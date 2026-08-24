@@ -20,7 +20,7 @@ from .models import ResyError
 from .notify import Notifier
 from .resy import DEFAULT_API_KEY, ResyClient
 from .state import Store
-from .timeutil import humanize_delta, now_nyc, nyc_at, today_nyc
+from .timeutil import humanize_delta, next_occurrence_nyc, now_nyc, today_nyc
 
 app = typer.Typer(
     add_completion=False,
@@ -513,10 +513,8 @@ def status(
         now = now_nyc()
         for target in config.active_targets:
             if target.drop and target.drop.enabled:
-                next_drop = nyc_at(now.date(), target.drop.at)
-                if next_drop <= now:
-                    next_drop = nyc_at(now.date() + timedelta(days=1), target.drop.at)
-                day = drop_target_day(target, today_nyc())
+                next_drop = next_occurrence_nyc(target.drop.at, now)
+                day = drop_target_day(target, next_drop.date())
                 drop_text = (
                     f"{humanize_delta((next_drop - now).total_seconds())} "
                     f"({day.isoformat() if day else 'no matching date'})"
@@ -643,11 +641,12 @@ def doctor(
                         "      [yellow]warn[/] action=book but no payment method on file"
                     )
                 if target.drop and target.drop.enabled:
-                    day = drop_target_day(target, today_nyc())
+                    next_drop = next_occurrence_nyc(target.drop.at, now_nyc())
+                    day = drop_target_day(target, next_drop.date())
                     if day is None:
                         console.print(
-                            "      [yellow]warn[/] today's drop date fails this target's "
-                            "weekday/date filters -- nothing will be sniped today"
+                            "      [yellow]warn[/] the next drop's released date fails this "
+                            "target's weekday/date filters -- nothing will be sniped at it"
                         )
                     discovered = await hunter.resolve_drop_policy(target)
                     if discovered is None:

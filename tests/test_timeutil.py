@@ -93,3 +93,48 @@ class TestMeasureClockOffset:
         async with httpx.AsyncClient(base_url="https://api.resy.com") as client:
             offset = await measure_clock_offset(client, "/3/venue", probes=3)
         assert offset.samples == 0
+
+
+class TestNextOccurrence:
+    """REGRESSION: 'today at HH:MM' was assembled by hand in three places, and
+    it is wrong twice a day in exactly the ways that lose reservations."""
+
+    def test_a_future_time_today_is_today(self):
+        now = datetime(2026, 8, 24, 8, 0, tzinfo=NYC)
+        from jamesiv.timeutil import next_occurrence_nyc
+        assert next_occurrence_nyc(dtime(10, 0), now) == datetime(2026, 8, 24, 10, 0, tzinfo=NYC)
+
+    def test_midnight_drop_seen_from_the_evening_before_is_tonight(self):
+        # The scheduler wakes 75s early: at 23:58:45 the "next midnight" must be
+        # 76 seconds away, not 24 hours ago. This exact case silently killed
+        # every midnight-release venue before the fix.
+        from jamesiv.timeutil import next_occurrence_nyc
+        now = datetime(2026, 8, 24, 23, 58, 45, tzinfo=NYC)
+        nxt = next_occurrence_nyc(dtime(0, 0), now)
+        assert nxt == datetime(2026, 8, 25, 0, 0, tzinfo=NYC)
+        assert (nxt - now).total_seconds() == 75
+
+    def test_a_just_missed_drop_still_counts_as_now(self):
+        # 30s late must fire into the tail of the release, not roll to tomorrow.
+        from jamesiv.timeutil import next_occurrence_nyc
+        now = datetime(2026, 8, 24, 10, 0, 30, tzinfo=NYC)
+        assert next_occurrence_nyc(dtime(10, 0), now) == datetime(2026, 8, 24, 10, 0, tzinfo=NYC)
+
+    def test_a_long_missed_drop_rolls_to_tomorrow(self):
+        from jamesiv.timeutil import next_occurrence_nyc
+        now = datetime(2026, 8, 24, 10, 5, 0, tzinfo=NYC)
+        assert next_occurrence_nyc(dtime(10, 0), now) == datetime(2026, 8, 25, 10, 0, tzinfo=NYC)
+
+    def test_midnight_drop_books_the_right_night(self):
+        # Composition with drop_target_day: armed at 23:58 on the 24th for a
+        # midnight drop with days_ahead=30, the released date is Sep 24
+        # (25th + 30), not Sep 23 (24th + 30).
+        from datetime import date
+
+        from jamesiv.config import Target
+        from jamesiv.matching import drop_target_day
+        from jamesiv.timeutil import next_occurrence_nyc
+        now = datetime(2026, 8, 24, 23, 58, 45, tzinfo=NYC)
+        target = Target(name="T", slug="t", drop={"at": "00:00", "days_ahead": 30})
+        release = next_occurrence_nyc(target.drop.at, now)
+        assert drop_target_day(target, release.date()) == date(2026, 9, 24)

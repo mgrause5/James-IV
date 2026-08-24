@@ -31,16 +31,18 @@ def candidate_days(target: Target, today: date) -> list[date]:
     return days
 
 
-def drop_target_day(target: Target, today: date) -> date | None:
-    """The date whose inventory is released at the next drop.
+def drop_target_day(target: Target, release_day: date) -> date | None:
+    """The date whose inventory is released by the drop on `release_day`.
 
-    A venue booking 30 days out releases `today + 30` at 9am. If the target also
-    constrains weekdays and that date does not qualify, there is nothing to
-    snipe today.
+    A venue booking 30 days out releases `release_day + 30`. Callers must pass
+    the date of the *drop instant* (see `next_occurrence_nyc`), not "today" --
+    for a midnight drop armed at 23:58, those differ, and using today books
+    the wrong night. If the released date fails the target's weekday or date
+    filters, there is nothing to snipe at that drop.
     """
     if target.drop is None:
         return None
-    day = today + timedelta(days=target.drop.days_ahead)
+    day = release_day + timedelta(days=target.drop.days_ahead)
     if target.weekdays and day.weekday() not in target.weekdays:
         return None
     if target.dates and day not in target.dates:

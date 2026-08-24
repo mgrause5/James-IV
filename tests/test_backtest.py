@@ -630,3 +630,78 @@ async def test_default_drop_profile_fires_at_most_five_requests(rig):
 
     assert sim.find_calls <= 5, f"default profile fired {sim.find_calls} requests"
     assert sim.book_calls == 0
+
+
+async def test_party_size_fallback_cannot_double_the_request_budget(rig):
+    """REGRESSION: the budget counted loop iterations, but each iteration fired
+    one request per party size -- cap 5 with a fallback meant up to 10 requests,
+    violating the owner's hard limit."""
+    sim = SimResy()   # nothing released: every attempt probes every size
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            party_size=2,
+            party_size_fallback=[3, 4],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_interval_ms": 100,
+                "clock_probes": 2,
+            },
+        )
+        assert target.drop.max_requests == 5
+        hunter, _ = await rig(target)
+        await hunter.login()
+        await hunter.snipe(target)
+
+    assert sim.find_calls <= 5, f"fallback sizes leaked past the budget: {sim.find_calls}"
+
+
+async def test_an_imminent_drop_is_sniped_not_skipped_to_tomorrow(rig):
+    """REGRESSION: the scheduler treated any drop closer than 90s as 'missed'
+    and armed for tomorrow -- so starting the bot at 9:59 for a 10:00 release
+    deliberately sat out a drop it could have caught."""
+    import asyncio
+
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=4)).strftime("%H:%M:%S"),
+                "lead_ms": 200,
+                "burst_interval_ms": 400,
+                "clock_probes": 2,
+            },
+        )
+        hunter, _ = await rig(target)
+        await hunter.login()
+        # Release aligned with drop.at; shots at ~3.8s, 4.2s... the second one
+        # lands after the release with margin to spare.
+        sim.release_in(4.0, slot_at(30, "19:00"))
+
+        task = asyncio.create_task(hunter.snipe_scheduler(target))
+        try:
+            await asyncio.wait_for(
+                _wait_for(lambda: len(sim.booked) > 0, timeout=15.0), timeout=20.0
+            )
+        finally:
+            task.cancel()
+
+    assert len(sim.booked) == 1, "scheduler skipped an imminent drop"
+
+
+async def _wait_for(predicate, timeout: float):
+    import asyncio
+
+    deadline = timeout
+    step = 0.2
+    waited = 0.0
+    while waited < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(step)
+        waited += step
+    raise AssertionError("condition never became true")

@@ -58,6 +58,26 @@ def parse_hhmm(value: str) -> dtime:
     return dtime(hour=h, minute=m, second=s)
 
 
+def next_occurrence_nyc(t: dtime, now: datetime, *, grace_seconds: float = 60.0) -> datetime:
+    """The next time the NYC wall clock reads `t`, seen from `now`.
+
+    A drop whose instant passed less than `grace_seconds` ago still counts as
+    "now": a bot that wakes slightly late should fire into the tail of the
+    release, not write the whole day off. Beyond the grace it rolls to
+    tomorrow.
+
+    This exists because "today at HH:MM" is wrong twice a day in exactly the
+    ways that lose reservations: woken 75s before a midnight drop, "today" is
+    still yesterday; woken just after a 10am drop, "today at 10" is in the
+    past. All drop scheduling must go through here rather than combining
+    `today` with a wall-clock time by hand.
+    """
+    candidate = nyc_at(now.astimezone(NYC).date(), t)
+    if candidate < now - timedelta(seconds=grace_seconds):
+        candidate = nyc_at(candidate.date() + timedelta(days=1), t)
+    return candidate
+
+
 def parse_slot_datetime(value: str) -> datetime:
     """Resy returns slot times as naive 'YYYY-MM-DD HH:MM:SS' in venue-local time."""
     return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=NYC)

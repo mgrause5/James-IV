@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from .config import Config, Secrets, Target
 from .matching import best_slots, candidate_days, drop_target_day, slot_matches
@@ -30,9 +30,9 @@ from .timeutil import (
     ZERO_OFFSET,
     humanize_delta,
     measure_clock_offset,
+    next_occurrence_nyc,
     now_nyc,
     now_utc,
-    nyc_at,
     sleep_until,
     today_nyc,
 )
@@ -309,7 +309,7 @@ class Hunter:
         await self.notifier.send(
             title,
             body,
-            priority=PRIORITY_HIGH if not missed else PRIORITY_HIGH,
+            priority=PRIORITY_HIGH,
             url=resy_url(
                 target.slug,
                 day=top.day.isoformat(),
@@ -431,16 +431,26 @@ class Hunter:
 
     # ------------------------------------------------------------ snipe engine
 
-    async def snipe(self, target: Target) -> Booking | None:
-        """Fire a burst at the exact moment a venue releases inventory."""
+    async def snipe(self, target: Target, drop_instant: datetime | None = None) -> Booking | None:
+        """Fire a burst at the exact moment a venue releases inventory.
+
+        `drop_instant` is the release moment being sniped; the scheduler passes
+        the one it armed for. When omitted (one-shot CLI use) the next
+        occurrence of `drop.at` is used. Everything -- the released date, the
+        fire time -- derives from that instant, never from "today": armed 75s
+        before a midnight drop, today is still yesterday.
+        """
         drop = target.drop
         if drop is None or not drop.enabled:
             return None
 
-        day = drop_target_day(target, today_nyc())
+        if drop_instant is None:
+            drop_instant = next_occurrence_nyc(drop.at, now_nyc())
+
+        day = drop_target_day(target, drop_instant.date())
         if day is None:
-            log.info("%s: next drop date does not match this target's filters; skipping",
-                     target.name)
+            log.info("%s: the %s drop's date does not match this target's filters; skipping",
+                     target.name, drop_instant.date())
             return None
 
         venue_id = await self.resolve_venue(target)
@@ -459,15 +469,19 @@ class Hunter:
             offset = ZERO_OFFSET
         await self.client.warm()
 
-        drop_at_server = nyc_at(now_nyc().date(), drop.at)
-        fire_at = offset.local_time_for_server_time(drop_at_server) - timedelta(
+        fire_at = offset.local_time_for_server_time(drop_instant) - timedelta(
             milliseconds=drop.lead_ms
         )
 
         wait = (fire_at - now_utc()).total_seconds()
-        if wait < -5.0:
-            log.warning("%s: drop time already passed %s ago", target.name, humanize_delta(-wait))
+        if wait < -90.0:
+            # next_occurrence_nyc keeps lateness within its grace, so this only
+            # trips when a caller hands us a stale instant explicitly.
+            log.warning("%s: drop instant passed %s ago; skipping",
+                        target.name, humanize_delta(-wait))
             return None
+        # A small negative wait means we woke slightly late: fire immediately
+        # into the tail of the release rather than writing the day off.
 
         log.warning(
             "SNIPE ARMED %s -- %s inventory, firing in %s",
@@ -501,9 +515,14 @@ class Hunter:
                 if attempts >= drop.max_requests:
                     stop.set()
                     return
-                attempts += 1
                 try:
                     for party_size in target.party_sizes:
+                        # The budget counts requests, and each party size is a
+                        # request -- a fallback size must not double the spend.
+                        if attempts >= drop.max_requests:
+                            stop.set()
+                            return
+                        attempts += 1
                         slots = await self.client.find(
                             venue_id=venue_id,
                             day=day.isoformat(),
@@ -620,27 +639,35 @@ class Hunter:
                 drop = target.drop  # apply_drop_policy may have replaced it
 
             now = now_nyc()
-            next_drop = nyc_at(now.date(), drop.at)
-            if next_drop <= now + timedelta(seconds=90):
-                next_drop = nyc_at(now.date() + timedelta(days=1), drop.at)
+            next_drop = next_occurrence_nyc(drop.at, now)
 
-            # Wake up early enough to sync clocks and warm the connection.
+            # Wake early enough to sync clocks and warm the connection. If the
+            # drop is closer than that -- the bot was started at 9:59 for a
+            # 10:00 release -- skip the ceremony and snipe NOW; a shortened
+            # warm-up beats deliberately sitting out today's drop.
             wake_at = next_drop - timedelta(seconds=75)
-            log.info(
-                "%s: next drop %s (in %s)",
-                target.name,
-                next_drop.strftime("%a %b %d %H:%M:%S %Z"),
-                humanize_delta((next_drop - now).total_seconds()),
-            )
-            await sleep_until(wake_at)  # aware datetimes compare across zones
+            if wake_at > now:
+                log.info(
+                    "%s: next drop %s (in %s)",
+                    target.name,
+                    next_drop.strftime("%a %b %d %H:%M:%S %Z"),
+                    humanize_delta((next_drop - now).total_seconds()),
+                )
+                await sleep_until(wake_at)  # aware datetimes compare across zones
+            else:
+                log.warning(
+                    "%s: drop at %s is imminent -- arming immediately",
+                    target.name, next_drop.strftime("%H:%M:%S"),
+                )
 
             generation = self._auth_generation
             try:
-                await self.snipe(target)
+                await self.snipe(target, drop_instant=next_drop)
             except AuthError:
                 if await self.recover_auth(generation):
                     try:
-                        await self.snipe(target)  # token was the only problem; go again
+                        # token was the only problem; go again
+                        await self.snipe(target, drop_instant=next_drop)
                     except Exception as exc:
                         log.exception("Snipe retry failed for %s: %s", target.name, exc)
             except Exception as exc:
@@ -728,9 +755,7 @@ class Hunter:
         now = now_nyc()
         for target in targets:
             if target.drop and target.drop.enabled:
-                next_drop = nyc_at(now.date(), target.drop.at)
-                if next_drop <= now:
-                    next_drop = nyc_at(now.date() + timedelta(days=1), target.drop.at)
+                next_drop = next_occurrence_nyc(target.drop.at, now)
                 when = humanize_delta((next_drop - now).total_seconds())
                 lines.append(f"{target.name}: {target.action}, next drop in {when}")
             else:
