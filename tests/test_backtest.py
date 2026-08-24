@@ -474,3 +474,75 @@ async def test_dry_run_stops_the_burst_instead_of_faking_lost_races(rig):
     assert sim.book_calls == 0
     assert elapsed < 10, f"burst ran {elapsed:.0f}s instead of standing down on dry run"
     assert "dry run" in notifier.titles().lower()
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: drop-policy auto-discovery. The user configures the wrong drop
+# time; the venue's own page states the right one; auto mode must correct it
+# before the snipe arms.
+# ---------------------------------------------------------------------------
+
+
+async def test_auto_discovery_corrects_a_wrong_configured_drop(rig):
+    sim = SimResy()
+    sim.venue_extra = {
+        "config": {"lead_time_in_days": 21},
+        "content": [
+            {
+                "name": "need_to_know",
+                "body": "Reservations open 21 days in advance at 10:00AM daily.",
+            }
+        ],
+    }
+    with sim.mock():
+        target = build_target(
+            drop={
+                "auto": True,
+                "at": "09:00:00",     # wrong: the page says 10am
+                "days_ahead": 30,     # wrong: the page says 21
+            },
+        )
+        hunter, _ = await rig(target)
+        await hunter.login()
+        await hunter.apply_drop_policy(target)
+
+    from datetime import time as dtime
+
+    assert target.drop.at == dtime(10, 0), "release time not corrected from the page"
+    assert target.drop.days_ahead == 21, "day count not corrected from the page"
+
+
+async def test_auto_discovery_keeps_config_when_the_page_is_silent(rig):
+    sim = SimResy()
+    sim.venue_extra = {
+        "content": [{"body": "A love letter to the classic New York chophouse."}]
+    }
+    with sim.mock():
+        target = build_target(drop={"auto": True, "at": "09:00:00", "days_ahead": 30})
+        hunter, _ = await rig(target)
+        await hunter.login()
+        await hunter.apply_drop_policy(target)
+
+    from datetime import time as dtime
+
+    assert target.drop.at == dtime(9, 0), "configured fallback was lost"
+    assert target.drop.days_ahead == 30
+
+
+async def test_a_monthly_release_is_flagged_and_never_silently_applied(rig):
+    sim = SimResy()
+    sim.venue_extra = {
+        "content": [
+            {"body": "Reservations open on the 1st of the month for the month ahead."}
+        ]
+    }
+    with sim.mock():
+        target = build_target(drop={"auto": True, "at": "09:00:00", "days_ahead": 30})
+        hunter, notifier = await rig(target)
+        await hunter.login()
+        await hunter.apply_drop_policy(target)
+
+    from datetime import time as dtime
+
+    assert target.drop.at == dtime(9, 0), "monthly cadence must not rewrite drop timing"
+    assert "monthly" in notifier.titles().lower(), "the user was never told"

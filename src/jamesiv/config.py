@@ -87,11 +87,16 @@ class DropConfig(BaseModel):
     """When a venue releases new inventory.
 
     Most hard NYC rooms drop a fixed number of days ahead at a fixed local time
-    -- 9:00am ET, 30 days out, is the single most common pattern. Check the
-    venue's Resy page; it is stated in the notes.
+    -- 9:00am ET, 30 days out, is the single most common pattern. It is stated
+    on the venue's Resy page, and `auto: true` reads it from there so you do
+    not have to transcribe it. `james policy <slug>` shows what would be read.
     """
 
     enabled: bool = True
+    # Discover `at` and `days_ahead` from the venue's own Resy page at startup
+    # (and re-check daily). Values you set explicitly below are kept as
+    # fallbacks for anything discovery cannot determine.
+    auto: bool = False
     at: time = Field(default=time(9, 0, 0))
     days_ahead: int = Field(default=30, ge=1, le=365)
     # Start firing this many ms early to absorb network latency. The first

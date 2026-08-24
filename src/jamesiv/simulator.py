@@ -68,6 +68,9 @@ class SimResy:
     """Stateful fake Resy. Register with `with sim.mock():`."""
 
     slots: list[SimSlot] = field(default_factory=list)
+    # Extra keys merged into the /3/venue response -- e.g. a booking-policy
+    # blurb, for exercising drop-policy discovery.
+    venue_extra: dict = field(default_factory=dict)
     # Session control
     valid_token: str = "sim-token-1"
     expire_after_finds: int | None = None
@@ -117,7 +120,8 @@ class SimResy:
     def _handle_venue(self, request: httpx.Request) -> httpx.Response:
         if not self._authed(request):
             return httpx.Response(419)
-        return httpx.Response(200, json={"id": {"resy": VENUE_ID}, "name": VENUE_NAME})
+        payload = {"id": {"resy": VENUE_ID}, "name": VENUE_NAME, **self.venue_extra}
+        return httpx.Response(200, json=payload)
 
     def _handle_head(self, request: httpx.Request) -> httpx.Response:
         stamp = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())

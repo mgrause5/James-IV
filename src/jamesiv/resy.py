@@ -228,7 +228,10 @@ class ResyClient:
 
     # ----------------------------------------------------------------- venues
 
-    async def venue_by_slug(self, slug: str, *, location: str = "ny") -> Venue:
+    async def venue_raw(self, slug: str, *, location: str = "ny") -> dict[str, Any]:
+        """The full `/3/venue` payload. Besides the id, this carries the venue's
+        booking-policy prose and (often) a structured lead-time field -- see
+        `policy.extract_policy`."""
         resp = await self._request(
             "GET", "/3/venue", params={"url_slug": slug, "location": location}
         )
@@ -236,8 +239,13 @@ class ResyClient:
             raise ResyError(f"no venue with slug {slug!r} in location {location!r}")
         if resp.status_code != 200:
             raise ResyError(f"venue lookup failed for {slug!r}", status=resp.status_code)
+        try:
+            return resp.json()
+        except json.JSONDecodeError as exc:
+            raise ResyError(f"venue lookup for {slug!r} returned non-JSON") from exc
 
-        body = resp.json()
+    async def venue_by_slug(self, slug: str, *, location: str = "ny") -> Venue:
+        body = await self.venue_raw(slug, location=location)
         venue_id = (body.get("id") or {}).get("resy")
         if venue_id is None:
             raise ResyError(f"venue lookup for {slug!r} returned no id")

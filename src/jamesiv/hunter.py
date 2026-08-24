@@ -23,6 +23,7 @@ from .config import Config, Secrets, Target
 from .matching import best_slots, candidate_days, drop_target_day, slot_matches
 from .models import AuthError, Booking, RateLimited, ResyError, Slot, SlotTaken
 from .notify import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_URGENT, Notifier, resy_url
+from .policy import DropPolicy, extract_policy
 from .resy import ResyClient
 from .state import Store
 from .timeutil import (
@@ -63,6 +64,7 @@ class Hunter:
         self._book_lock = asyncio.Lock()
         self._auth_lock = asyncio.Lock()
         self._auth_generation = 0
+        self._policy_seen: dict[str, str] = {}
 
     # ------------------------------------------------------------------ setup
 
@@ -344,6 +346,73 @@ class Hunter:
             jitter = base * target.poll_jitter
             await asyncio.sleep(max(5.0, random.uniform(base - jitter, base + jitter)))
 
+    # ---------------------------------------------------------- drop discovery
+
+    async def resolve_drop_policy(self, target: Target) -> DropPolicy | None:
+        """Read the venue's release policy off its own Resy page."""
+        try:
+            raw = await self.client.venue_raw(target.slug, location=target.location)
+        except AuthError:
+            raise
+        except ResyError as exc:
+            log.warning("Could not fetch %s's page for policy discovery: %s", target.name, exc)
+            return None
+        return extract_policy(raw)
+
+    async def apply_drop_policy(self, target: Target) -> None:
+        """Overwrite drop timing with whatever the venue's page states.
+
+        Called once per scheduler cycle (i.e. daily), so a venue that changes
+        its policy mid-season is picked up without a restart. Explicit config
+        values survive as fallbacks for anything the page does not state, and
+        every applied change is logged so `auto` never means `silent`.
+        """
+        assert target.drop is not None
+        policy = await self.resolve_drop_policy(target)
+        marker = policy.describe() if policy else None
+
+        if policy is None:
+            if self._policy_seen.get(target.name, "") != "none":
+                self._policy_seen[target.name] = "none"
+                log.warning(
+                    "%s: no release policy found on the venue page; using configured "
+                    "drop settings (%s, %d days ahead)",
+                    target.name, target.drop.at.strftime("%H:%M"), target.drop.days_ahead,
+                )
+            return
+
+        if policy.cadence == "monthly":
+            if self._policy_seen.get(target.name) != marker:
+                self._policy_seen[target.name] = marker
+                log.warning(
+                    "%s: the venue releases inventory monthly (%r), which the daily "
+                    "snipe scheduler does not model. Keeping your configured settings; "
+                    "consider pinning explicit `dates` for the release day.",
+                    target.name, policy.snippet,
+                )
+                await self.notifier.send(
+                    f"{target.name}: monthly release detected",
+                    f"\"{policy.snippet}\"\nAuto drop timing is off for this venue.",
+                    priority=PRIORITY_HIGH,
+                )
+            return
+
+        updates = {}
+        if policy.days_ahead is not None and policy.days_ahead != target.drop.days_ahead:
+            updates["days_ahead"] = policy.days_ahead
+        if policy.at is not None and policy.at != target.drop.at:
+            updates["at"] = policy.at
+        if updates:
+            target.drop = target.drop.model_copy(update=updates)
+
+        if self._policy_seen.get(target.name) != marker:
+            self._policy_seen[target.name] = marker
+            log.warning(
+                "%s: release policy from venue page -- %s (source: %s%s)",
+                target.name, policy.describe(), policy.source,
+                f', "{policy.snippet}"' if policy.snippet else "",
+            )
+
     # ------------------------------------------------------------ snipe engine
 
     async def snipe(self, target: Target) -> Booking | None:
@@ -520,6 +589,16 @@ class Hunter:
             if self.store.booking_count(target.name) >= target.max_bookings:
                 log.info("%s satisfied; stopping snipe scheduler", target.name)
                 return
+
+            if drop.auto:
+                try:
+                    await self.apply_drop_policy(target)
+                except AuthError:
+                    generation = self._auth_generation
+                    await self.recover_auth(generation)
+                except Exception as exc:
+                    log.warning("Policy discovery failed for %s: %s", target.name, exc)
+                drop = target.drop  # apply_drop_policy may have replaced it
 
             now = now_nyc()
             next_drop = nyc_at(now.date(), drop.at)

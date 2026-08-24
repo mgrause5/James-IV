@@ -56,24 +56,29 @@ email/password path is the more reliable one.
 The goal is that Torrisi releases Friday tables 30 days out and you do nothing.
 Here's the whole path.
 
-**1. Find the venue and confirm its booking window.**
+**1. Ask the venue's own page for its release policy.**
 
 ```bash
-james venue torrisi              # slug -> venue id
-james window torrisi --days 45   # where does inventory actually exist?
+james policy torrisi
 ```
 
-`window` walks forward day by day and reports the furthest date with
-availability. If that lands on a round number — 30 days out — that's your
-`drop.days_ahead`. Run it shortly after a drop, when the newly released day is
-still the far edge and obvious.
+The `/3/venue` payload carries what a human reads on the website — the
+"Need to Know" notes ("Reservations open 30 days in advance at 9:00AM") and,
+for many venues, a structured lead-time field that drives the site's own
+calendar. `policy` parses both and prints a ready-to-paste `drop:` block.
 
-**2. Get the release time from the venue, not from a guess.** It's in the
-booking policy notes on the venue's Resy page ("Reservations open 30 days in
-advance at 9AM"). This is the single most common reason a snipe fires into an
-empty result set, and no amount of code can infer it.
+Two fallbacks for venues that publish less:
 
-**3. Write the target.**
+```bash
+james window torrisi --days 45   # infer days_ahead from where inventory exists
+```
+
+`window` walks forward day by day; the furthest date with availability, if it
+lands on a round number, is your `drop.days_ahead`. And if the page states no
+release *time* at all, that one field you set by hand — it's the only thing
+left that can require a human.
+
+**2. Write the target — or let it configure itself.**
 
 ```yaml
 - name: Torrisi
@@ -88,12 +93,20 @@ empty result set, and no amount of code can infer it.
   preferred_windows:
     - { start: "19:00", end: "20:30" }
   drop:
-    at: "09:00:00"
+    auto: true           # read at/days_ahead off the venue page, re-check daily
+    at: "09:00:00"       # fallback if the page goes quiet
     days_ahead: 30
   max_bookings: 1
 ```
 
-**4. Rehearse it before trusting it.**
+With `auto: true` the scheduler re-reads the page every cycle, so a venue that
+quietly moves from 30 days to 21 mid-season is picked up without a restart.
+Every applied change is logged — auto never means silent. The one shape it
+refuses to guess about is a monthly release ("reservations open on the 1st of
+the month"): a daily snipe would fire into nothing 29 mornings out of 30, so
+the bot flags it, notifies you, and keeps your explicit config instead.
+
+**3. Rehearse it before trusting it.**
 
 ```bash
 james simulate Torrisi --scenario drop          # inventory lands; do we catch it?
@@ -108,10 +121,11 @@ credentials, no real booking. It's how you find out that `days_ahead` is wrong,
 or that your time window excludes everything, on a Tuesday afternoon rather than
 at 9am on a Friday.
 
-**5. Check the real thing, then let it run.**
+**4. Check the real thing, then let it run.**
 
 ```bash
-james doctor        # credentials, payment method, every venue slug
+james doctor        # credentials, payment method, every venue slug -- and it
+                    # cross-checks each drop config against the venue's page
 james test-notify   # confirm push actually reaches your phone
 docker compose up -d
 ```
@@ -161,11 +175,11 @@ what you want; if it isn't, tighten `earliest`/`latest` instead of reordering
 `seating_types`.
 
 **`drop.at` and `drop.days_ahead` are the two settings that decide whether a
-snipe works.** They're on the venue's Resy page, in the booking policy notes
-("Reservations open 30 days in advance at 9AM"). Guessing them is the single
-most common reason a snipe fires into an empty result set. `james doctor` will
-warn you when today's release date can't satisfy a target's weekday filter, but
-it can't tell you the drop time is wrong — only the venue can.
+snipe works** — and mostly you shouldn't set them by hand. `drop.auto: true`
+reads them off the venue's own page and re-checks daily; `james policy <slug>`
+shows what would be read; and `james doctor` cross-checks whatever's configured
+against the page and warns on a mismatch. Manual values remain as fallbacks,
+and matter only for venues that publish nothing.
 
 Omit the `drop:` block entirely for a pure cancellation hunter.
 
@@ -179,7 +193,8 @@ Omit the `drop:` block entirely for a pure cancellation hunter.
 | `james snipe <target>` | Arm a single drop and exit after it fires. `--now` to fire immediately. |
 | `james status` | Confirmed bookings, target schedule, recent activity. |
 | `james venue <slug>` | Resolve a Resy URL slug to a venue id. |
-| `james window <slug>` | Probe the booking horizon, to find `days_ahead` without guessing. |
+| `james policy <slug>` | Read the release time and window off the venue's own page. |
+| `james window <slug>` | Probe the booking horizon empirically, when the page states nothing. |
 | `james simulate <target>` | Rehearse a target against a simulated Resy. No credentials, no booking. |
 | `james cancel <token>` | Cancel a reservation the bot booked. |
 | `james test-notify` | Send a test push, so you find out now and not at 9am. |
@@ -330,6 +345,7 @@ src/jamesiv/
 ├── matching.py    # which dates to check, which table wins  (pure)
 ├── models.py      # Slot, Booking, error taxonomy
 ├── notify.py      # ntfy + pushover
+├── policy.py      # release-policy discovery from the venue's own page
 ├── resy.py        # API client, token bucket, connection reuse
 ├── simulator.py   # stateful fake Resy, for back-testing and `james simulate`
 ├── state.py       # SQLite: bookings, dedupe, events

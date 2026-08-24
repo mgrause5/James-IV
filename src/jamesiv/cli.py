@@ -207,6 +207,69 @@ def venue(
 
 
 @app.command()
+def policy(
+    slug: str = typer.Argument(..., help="Resy URL slug."),
+    location: str = typer.Option("ny", "--location", "-l"),
+    config_path: str = typer.Option(DEFAULT_CONFIG, "--config", "-c"),
+) -> None:
+    """Read a venue's release policy off its own Resy page.
+
+    Prints what the page states -- release time, days in advance -- and a
+    ready-to-paste `drop:` block. With `drop.auto: true` in your target the
+    bot does this itself at startup and daily thereafter.
+    """
+    from .policy import extract_policy
+
+    config, secrets = _load(config_path)
+
+    async def _policy(hunter: Hunter):
+        await hunter.login()
+        raw = await hunter.client.venue_raw(slug, location=location)
+        name = raw.get("name") or slug
+        found = extract_policy(raw)
+
+        console.print(f"[bold]{name}[/]")
+        if found is None:
+            console.print(
+                "\n[yellow]No release policy stated on this venue's page.[/] "
+                "Some venues just do not publish it; you will need to set "
+                "`drop.at` and `drop.days_ahead` by hand (try `james window` "
+                "for the day count)."
+            )
+            return
+
+        console.print(
+            f"  discovered: [green]{found.describe()}[/]  [dim](source: {found.source})[/]"
+        )
+        if found.snippet:
+            console.print(f'  from: [dim]"{found.snippet}"[/]')
+
+        if found.cadence == "monthly":
+            console.print(
+                "\n[yellow]This venue releases monthly, not on a rolling daily "
+                "window.[/] The snipe scheduler models daily drops; pin explicit "
+                "`dates` for the release day instead of using `drop.auto`."
+            )
+            return
+
+        console.print("\n[bold]Suggested target block:[/]")
+        lines = ["    drop:", "      auto: true   # re-reads this page daily"]
+        if found.at is not None:
+            lines.append(f'      at: "{found.at:%H:%M:%S}"')
+        if found.days_ahead is not None:
+            lines.append(f"      days_ahead: {found.days_ahead}")
+        console.print("\n".join(lines))
+        if not found.complete:
+            missing = "release time" if found.at is None else "day count"
+            console.print(
+                f"\n[yellow]The page does not state the {missing}[/] -- fill that "
+                "field in yourself; `auto` keeps your value as the fallback."
+            )
+
+    asyncio.run(_with_hunter(config, secrets, _policy))
+
+
+@app.command()
 def window(
     slug: str = typer.Argument(..., help="Resy URL slug."),
     days: int = typer.Option(45, "--days", "-d", help="How many days ahead to probe."),
@@ -565,6 +628,47 @@ def doctor(
                             "      [yellow]warn[/] today's drop date fails this target's "
                             "weekday/date filters -- nothing will be sniped today"
                         )
+                    discovered = await hunter.resolve_drop_policy(target)
+                    if discovered is None:
+                        console.print(
+                            "      [dim]note[/] venue page states no release policy; "
+                            "cannot verify drop.at / drop.days_ahead"
+                        )
+                    elif discovered.cadence == "monthly":
+                        console.print(
+                            f'      [yellow]warn[/] venue page suggests a MONTHLY release '
+                            f'("{discovered.snippet}") -- a daily snipe will mostly fire '
+                            "into nothing"
+                        )
+                    else:
+                        mismatches = []
+                        if (
+                            discovered.days_ahead is not None
+                            and discovered.days_ahead != target.drop.days_ahead
+                        ):
+                            mismatches.append(
+                                f"days_ahead {target.drop.days_ahead} vs page "
+                                f"{discovered.days_ahead}"
+                            )
+                        if discovered.at is not None and discovered.at != target.drop.at:
+                            mismatches.append(
+                                f"at {target.drop.at:%H:%M} vs page {discovered.at:%H:%M}"
+                            )
+                        if mismatches:
+                            hint = (
+                                "auto: true will use the page's values"
+                                if not target.drop.auto
+                                else "auto: true is set, so the page's values win at runtime"
+                            )
+                            console.print(
+                                f"      [yellow]warn[/] config disagrees with the venue "
+                                f"page: {'; '.join(mismatches)} ({hint})"
+                            )
+                        else:
+                            console.print(
+                                f"      [green]ok[/] drop timing matches the venue page "
+                                f"({discovered.describe()})"
+                            )
             except Exception as exc:
                 console.print(f"  [red]fail[/] {target.name}: {exc}")
                 problems += 1
