@@ -73,8 +73,11 @@ class Notifier:
     async def _ntfy(
         self, title: str, message: str, priority: str, url: str | None, tags: list[str] | None
     ) -> None:
+        # HTTP headers are latin-1; a venue named "Café ..." must degrade
+        # gracefully in the title rather than crash the notification.
+        safe_title = title.encode("latin-1", "replace").decode("latin-1")
         headers = {
-            "Title": title,
+            "Title": safe_title,
             "Priority": _NTFY_PRIORITY.get(priority, "3"),
         }
         if tags:

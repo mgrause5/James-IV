@@ -128,7 +128,15 @@ def check(
             days = candidate_days(target, today_nyc())
             console.print(f"\n[bold]{target.name}[/]  [dim]{describe_target(target)}[/]")
             console.print(f"[dim]checking {len(days)} date(s)[/]")
-            slots = await hunter.search(target, days)
+            try:
+                slots = await hunter.search(target, days)
+            except ResyError as exc:
+                console.print(
+                    f"  [red]search failed:[/] {exc}\n"
+                    "  [dim]Every request was rejected -- if this persists, this "
+                    "network is being throttled by Resy's edge.[/]"
+                )
+                continue
             if not slots:
                 console.print("  [dim]nothing available[/]")
                 continue
@@ -295,13 +303,24 @@ def window(
         rows: list[tuple[date, int, str]] = []
         furthest: date | None = None
 
+        failures = 0
         with console.status("probing...") as status_line:
             for offset in range(days + 1):
                 day = today + timedelta(days=offset)
                 status_line.update(f"probing {day} ({offset}/{days})")
-                slots = await hunter.client.find(
-                    venue_id=venue.id, day=day.isoformat(), party_size=party
-                )
+                try:
+                    slots = await hunter.client.find(
+                        venue_id=venue.id, day=day.isoformat(), party_size=party
+                    )
+                except ResyError:
+                    failures += 1
+                    if failures >= 5 and failures == offset + 1:
+                        console.print(
+                            "[red]Every request so far has been rejected[/] -- this "
+                            "network looks throttled. Stopping the probe."
+                        )
+                        return
+                    continue
                 if slots:
                     furthest = day
                     times = ", ".join(s.clock for s in slots[:4])
