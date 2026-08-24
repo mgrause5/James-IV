@@ -65,7 +65,8 @@ targets:
       # what would be discovered; `james doctor` cross-checks it against this
       # file either way.
       auto: true
-      at: "09:00:00"     # fallback: venue-local release time (America/New_York)
+      at: "10:00:00"     # fallback (verified vs the live venue page, Aug 2026:
+                         # "up to 30 days in advance, starting at 10:00 AM EST")
       days_ahead: 30     # fallback: releases the date exactly this far out
       lead_ms: 250       # fire slightly early to absorb network latency
       burst_seconds: 20

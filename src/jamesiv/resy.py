@@ -39,6 +39,13 @@ BASE_URL = "https://api.resy.com"
 # `Authorization: ResyAPI api_key="..."` header.
 DEFAULT_API_KEY = "VbWk7s3L4KiK5fzlO7JD3Q5EYolJI7n5"
 
+# Coordinates sent with availability searches. The web client always sends the
+# user's real position and the API turns out to care: lat=0/long=0 -- which this
+# client originally sent -- is rejected with an empty HTTP 500 by Resy's edge.
+# Discovered by probing production; the simulator happily accepted 0/0.
+NYC_LAT = 40.7128
+NYC_LONG = -74.0060
+
 BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -260,20 +267,39 @@ class ResyClient:
         day: str,
         party_size: int,
         throttle: bool = True,
+        retries: int = 2,
     ) -> list[Slot]:
-        """Return every bookable slot at a venue on a date. The hot path."""
+        """Return every bookable slot at a venue on a date. The hot path.
+
+        Production `/4/find` also fails intermittently with an empty 500 even on
+        well-formed requests (observed live; likely edge/bot mitigation). The
+        default retries absorb that in the poll loop; the burst passes
+        `retries=0` because its own loop re-fires faster than a backoff would.
+        """
         resp = await self._request(
             "GET",
             "/4/find",
             params={
-                "lat": 0,
-                "long": 0,
+                "lat": NYC_LAT,
+                "long": NYC_LONG,
                 "day": day,
                 "party_size": party_size,
                 "venue_id": venue_id,
             },
             throttle=throttle,
+            retries=retries,
         )
+        if resp.status_code >= 500:
+            # Resy's edge intermittently rejects /4/find with an empty 500 --
+            # and when an IP is being throttled it does so persistently. That
+            # must surface as an error: a blocked bot silently returning "no
+            # availability" is indistinguishable from a full restaurant, which
+            # is the one failure mode an unattended hunter cannot afford.
+            raise ResyError(
+                f"availability search rejected (HTTP {resp.status_code}) -- "
+                "Resy's edge may be throttling this network",
+                status=resp.status_code,
+            )
         if resp.status_code != 200:
             log.debug("find returned HTTP %s: %s", resp.status_code, resp.text[:200])
             return []

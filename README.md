@@ -18,6 +18,11 @@ maybes to a push notification.
 
 ---
 
+**Never used a terminal before?** [SETUP.md](SETUP.md) walks the whole thing
+from zero — renting the server, pasting the commands, first booking — with no
+assumed knowledge. The quick start below is the short version for people who
+have done this kind of thing.
+
 ## Quick start
 
 ```bash
@@ -299,6 +304,32 @@ defaults are there for your sake as much as theirs.
 Book tables you intend to eat at, and cancel the ones you don't — `james cancel`
 exists for exactly that. Holding tables you won't use is how restaurants end up
 tightening the policies that make this necessary in the first place.
+
+## What has been verified against real Resy
+
+The simulator (below) proves the *logic*; it cannot prove that our picture of
+Resy's API matches reality. So the read-only endpoints were probed against
+production (August 2026):
+
+- `/3/venue` — works; the payload parses; **policy discovery read the real
+  Torrisi page** and returned "30 days ahead, at 10:00 ET" from the sentence
+  *"up to 30 days in advance, starting at 10:00 AM EST"*.
+- `/4/find` — the envelope and slot shapes match: **104 of 104 live slots
+  parsed** with real config tokens intact. Two production-only bugs surfaced
+  and were fixed: `lat=0&long=0` (which the client originally sent) is
+  rejected with an empty HTTP 500, and the same empty 500 also occurs
+  intermittently on well-formed requests when Resy's edge dislikes your IP.
+  The client now sends real NYC coordinates, retries the flake, raises
+  instead of reporting "no availability" when fully blocked, and pushes a
+  **"bot is blind" alert** after repeated total failures.
+- `/3/details` and `/3/book` are deliberately unprobed — they touch real
+  inventory. They get verified by *your* first booking, made on purpose at an
+  easily-cancelable venue (see SETUP.md's graduation steps), and undone with
+  `james cancel`.
+
+Because the edge throttling is per-IP, the only network that matters is the
+one your server is on — which is why `james doctor` runs a live availability
+probe from wherever it executes and fails loudly if that network is blocked.
 
 ## Development and back-testing
 

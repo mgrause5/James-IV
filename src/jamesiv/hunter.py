@@ -65,6 +65,7 @@ class Hunter:
         self._auth_lock = asyncio.Lock()
         self._auth_generation = 0
         self._policy_seen: dict[str, str] = {}
+        self._blind_polls: dict[str, int] = {}
 
     # ------------------------------------------------------------------ setup
 
@@ -141,6 +142,9 @@ class Hunter:
         venue_id = await self.resolve_venue(target)
         found: list[Slot] = []
         now = now_nyc()
+        errors = 0
+        attempts_made = 0
+        last_error: ResyError | None = None
 
         for day in days:
             for party_size in target.party_sizes:
@@ -161,9 +165,12 @@ class Hunter:
                     # session, finding nothing and never telling anyone.
                     raise
                 except ResyError as exc:
+                    errors += 1
+                    last_error = exc
                     log.debug("find failed for %s on %s: %s", target.name, day, exc)
                     continue
 
+                attempts_made += 1
                 # Filter here rather than after the loop: a party size that
                 # returns only slots we would reject (wrong time, too soon, wrong
                 # room) has not actually produced inventory, and we should still
@@ -173,6 +180,11 @@ class Hunter:
                 found.extend(matched)
                 if matched:
                     break
+
+        if errors and attempts_made == 0 and last_error is not None:
+            # Every single request failed: we are blind, not unlucky. Propagate
+            # so the poll loop can count it and eventually raise the alarm.
+            raise last_error
 
         return best_slots(target, found, now=now)
 
@@ -339,8 +351,12 @@ class Hunter:
             except RateLimited as exc:
                 await asyncio.sleep(exc.retry_after)
                 continue
+            except ResyError as exc:
+                await self._note_blind_poll(target, exc)
             except Exception as exc:
                 log.exception("Poll failed for %s: %s", target.name, exc)
+            else:
+                self._clear_blind_poll(target)
 
             base = target.poll_interval_seconds
             jitter = base * target.poll_jitter
@@ -497,6 +513,8 @@ class Hunter:
                             day=day.isoformat(),
                             party_size=party_size,
                             throttle=False,
+                            retries=0,  # the burst loop IS the retry; a backoff
+                                        # here would just slow the next attempt
                         )
                         ranked = best_slots(target, slots, now=now_nyc())
                         if not ranked:
@@ -675,6 +693,32 @@ class Hunter:
         finally:
             for task in tasks:
                 task.cancel()
+
+    async def _note_blind_poll(self, target: Target, exc: ResyError) -> None:
+        """Count consecutive polls where every request failed, and raise the
+        alarm once it stops looking like bad luck. A throttled or blocked bot
+        that keeps quietly reporting "nothing available" is the one failure an
+        unattended hunter cannot afford."""
+        count = self._blind_polls.get(target.name, 0) + 1
+        self._blind_polls[target.name] = count
+        threshold = self.config.settings.blind_poll_alert_after
+        log.warning("Poll for %s is blind (%d/%d): %s", target.name, count, threshold, exc)
+        if count == threshold:
+            await self.notifier.send(
+                f"James IV cannot see availability: {target.name}",
+                f"{count} polls in a row failed outright ({exc}).\n"
+                "The bot is running but effectively blind -- Resy may be "
+                "throttling this server's network. It will keep retrying and "
+                "tell you when sight returns.",
+                priority=PRIORITY_URGENT,
+            )
+            self.store.log_event("blind", str(exc), target.name)
+
+    def _clear_blind_poll(self, target: Target) -> None:
+        count = self._blind_polls.pop(target.name, 0)
+        if count >= self.config.settings.blind_poll_alert_after:
+            log.warning("%s: availability searches recovered after %d blind polls",
+                        target.name, count)
 
     def _startup_summary(self, targets: list[Target]) -> str:
         lines = []

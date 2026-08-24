@@ -76,6 +76,9 @@ class SimResy:
     expire_after_finds: int | None = None
     # Rate limit control: 429 the Nth find call (1-indexed), once.
     rate_limit_on_find: int | None = None
+    # Force every find to return this status. Models Resy's edge throttling
+    # /4/find with empty 500s, as observed against production.
+    find_status_override: int | None = None
     # Counters, for assertions
     find_calls: int = 0
     book_calls: int = 0
@@ -129,6 +132,9 @@ class SimResy:
 
     def _handle_find(self, request: httpx.Request) -> httpx.Response:
         self.find_calls += 1
+
+        if self.find_status_override is not None:
+            return httpx.Response(self.find_status_override)
 
         if self.rate_limit_on_find == self.find_calls:
             return httpx.Response(429, headers={"Retry-After": "1"})

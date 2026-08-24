@@ -617,6 +617,27 @@ def doctor(
                     f"  [green]ok[/] {target.name}{mark} -> venue {venue_id}, "
                     f"{len(days)} date(s), {describe_target(target)}"
                 )
+                # Live availability probe: verifies /4/find works from THIS
+                # network. Resy's edge throttles that endpoint per-IP, so the
+                # only meaningful test is from the machine that will hunt.
+                if days:
+                    try:
+                        probe = await hunter.client.find(
+                            venue_id=venue_id,
+                            day=days[0].isoformat(),
+                            party_size=target.party_size,
+                        )
+                        console.print(
+                            f"      [green]ok[/] availability search works from this "
+                            f"network ({len(probe)} slot(s) on {days[0]})"
+                        )
+                    except ResyError as probe_exc:
+                        console.print(
+                            f"      [red]fail[/] availability search blocked from this "
+                            f"network: {probe_exc}. The bot would be blind here -- "
+                            "try a different server/region."
+                        )
+                        problems += 1
                 if target.action == "book" and not hunter.client.payment_method_id:
                     console.print(
                         "      [yellow]warn[/] action=book but no payment method on file"

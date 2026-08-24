@@ -546,3 +546,58 @@ async def test_a_monthly_release_is_flagged_and_never_silently_applied(rig):
 
     assert target.drop.at == dtime(9, 0), "monthly cadence must not rewrite drop timing"
     assert "monthly" in notifier.titles().lower(), "the user was never told"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 7: Resy's edge throttles /4/find. Observed against production --
+# persistent empty 500s from a disfavored IP. A blocked bot must say so, not
+# quietly report "nothing available" forever.
+# ---------------------------------------------------------------------------
+
+
+async def test_a_fully_blocked_search_raises_instead_of_reporting_no_tables(rig):
+    sim = SimResy()
+    sim.find_status_override = 500
+    with sim.mock():
+        hunter, _ = await rig(build_target(days_ahead_min=0, days_ahead_max=2))
+        await hunter.login()
+        from jamesiv.models import ResyError
+
+        with pytest.raises(ResyError):
+            await hunter.poll_once(hunter.config.targets[0])
+
+
+async def test_the_blindness_alarm_fires_once_at_the_threshold(rig):
+    sim = SimResy()
+    sim.find_status_override = 500
+    with sim.mock():
+        target = build_target(days_ahead_min=0, days_ahead_max=1)
+        hunter, notifier = await rig(target, blind_poll_alert_after=3)
+        await hunter.login()
+        from jamesiv.models import ResyError
+
+        for _ in range(5):
+            exc = None
+            try:
+                await hunter.poll_once(target)
+            except ResyError as e:
+                exc = e
+            assert exc is not None
+            await hunter._note_blind_poll(target, exc)
+
+    alarms = [t for t, _ in notifier.sent if "cannot see availability" in t]
+    assert len(alarms) == 1, "alarm should fire exactly once, at the threshold"
+
+
+async def test_one_flaky_500_among_working_days_does_not_raise(rig):
+    sim = SimResy()
+    sim.rate_limit_on_find = None
+    with sim.mock():
+        # Day 1 works and has a table; intermittent flake is retried inside the
+        # client, and partial failure must not mask found inventory.
+        sim.add(slot_at(1, "19:30"))
+        hunter, _ = await rig(build_target(days_ahead_min=0, days_ahead_max=2))
+        await hunter.login()
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is not None

@@ -244,6 +244,9 @@ class Settings(BaseModel):
     log_level: str = "INFO"
     # Re-login this often; Resy tokens are long-lived but not eternal.
     reauth_interval_hours: float = Field(default=12.0, gt=0)
+    # Push an alert after this many consecutive polls where every availability
+    # request failed outright -- the "bot is blind" alarm.
+    blind_poll_alert_after: int = Field(default=8, ge=1)
     notify_on_miss: bool = False
 
 
