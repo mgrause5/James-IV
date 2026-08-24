@@ -1,0 +1,21 @@
+services:
+  james:
+    build: .
+    container_name: james-iv
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: America/New_York
+    volumes:
+      # Config is mounted read-only so a container compromise cannot rewrite
+      # your targets. Edit it on the host and `docker compose restart`.
+      - ./config.yaml:/app/config.yaml:ro
+      - ./state:/app/state
+    # A drop-time snipe that dies at 08:59:58 is worse than useless, so keep
+    # the container from being the thing that breaks.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

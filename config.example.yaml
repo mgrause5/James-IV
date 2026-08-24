@@ -1,0 +1,112 @@
+# James IV -- target configuration.
+# Copy to config.yaml and edit. Credentials live in .env, not here.
+
+settings:
+  # Find and rank, but never actually book. Start here for a day or two so you
+  # can see what the bot would have done before you let it use your card.
+  dry_run: true
+
+  # Hard ceiling on bookings per process run, across all targets. Cheap
+  # insurance against a config mistake booking you five dinners.
+  max_bookings_per_run: 2
+
+  # Requests per second against Resy, and burst allowance. The defaults are
+  # deliberately polite. Raising them does not make you faster at a drop
+  # (the burst path bypasses the bucket anyway) -- it just makes you noisier
+  # the other 23 hours of the day, which is how accounts get flagged.
+  request_rate: 4.0
+  request_burst: 8
+
+  state_path: state/james.db
+  log_level: INFO
+  reauth_interval_hours: 12
+
+  # Alert even when we found a table and lost the race to book it. Useful while
+  # tuning, noisy once you trust it.
+  notify_on_miss: false
+
+targets:
+  # ---------------------------------------------------------------------
+  # A drop-time snipe. This is the pattern for rooms that sell out the
+  # instant inventory is released.
+  #
+  # Find `at` and `days_ahead` on the venue's Resy page -- the booking policy
+  # is stated in the notes ("Reservations open 30 days in advance at 9AM").
+  # Getting these two wrong is the single most common reason a snipe finds
+  # nothing, so check them rather than assuming.
+  # ---------------------------------------------------------------------
+  - name: Tatiana
+    slug: tatiana-by-kwame-onwuachi
+    party_size: 2
+    action: book
+
+    days_ahead_min: 25
+    days_ahead_max: 35
+    weekdays: [thu, fri, sat]
+
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }   # first choice
+      - { start: "18:00", end: "19:00" }   # will accept
+      - { start: "20:30", end: "21:30" }   # will accept
+
+    seating_types: ["Dining Room", "Bar"]  # ranked; empty means anything
+    exclude_seating: ["Counter"]
+
+    drop:
+      enabled: true
+      at: "09:00:00"     # venue-local release time (America/New_York)
+      days_ahead: 30     # releases the date exactly this far out
+      lead_ms: 250       # fire slightly early to absorb network latency
+      burst_seconds: 20
+      burst_concurrency: 3
+      burst_interval_ms: 150
+
+    poll_interval_seconds: 60
+    max_bookings: 1
+    priority: 10
+
+  # ---------------------------------------------------------------------
+  # A cancellation hunter. No drop block -- it just watches a date range
+  # patiently and pounces when somebody cancels. This is where most tables
+  # actually come from.
+  # ---------------------------------------------------------------------
+  - name: 4 Charles Prime Rib
+    slug: 4-charles-prime-rib
+    party_size: 2
+    party_size_fallback: [3]
+    action: book
+
+    days_ahead_min: 0
+    days_ahead_max: 30
+    weekdays: [wed, thu, fri, sat]
+
+    earliest: "18:00"
+    latest: "21:00"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+
+    poll_interval_seconds: 45
+    poll_jitter: 0.35
+    max_bookings: 1
+    priority: 5
+    notes: "Notoriously hard. Cancellations trickle out all day."
+
+  # ---------------------------------------------------------------------
+  # Notify-only: a place you would like to know about but do not want the
+  # bot committing your card to.
+  # ---------------------------------------------------------------------
+  - name: Semma
+    slug: semma
+    party_size: 2
+    action: notify
+
+    dates:
+      - 2026-09-12
+      - 2026-09-13
+
+    earliest: "17:00"
+    latest: "22:00"
+    poll_interval_seconds: 90
+    priority: 1
