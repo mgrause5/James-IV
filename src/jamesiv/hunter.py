@@ -20,9 +20,9 @@ import random
 from datetime import date, timedelta
 
 from .config import Config, Secrets, Target
-from .matching import best_slots, candidate_days, drop_target_day
+from .matching import best_slots, candidate_days, drop_target_day, slot_matches
 from .models import AuthError, Booking, RateLimited, ResyError, Slot, SlotTaken
-from .notify import PRIORITY_HIGH, PRIORITY_URGENT, Notifier, resy_url
+from .notify import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_URGENT, Notifier, resy_url
 from .resy import ResyClient
 from .state import Store
 from .timeutil import (
@@ -61,6 +61,8 @@ class Hunter:
         self.bookings_this_run = 0
         self._venue_ids: dict[str, int] = {}
         self._book_lock = asyncio.Lock()
+        self._auth_lock = asyncio.Lock()
+        self._auth_generation = 0
 
     # ------------------------------------------------------------------ setup
 
@@ -76,6 +78,45 @@ class Hunter:
         await self.client.authenticate(self.secrets.resy_email, self.secrets.resy_password)
         if self.secrets.resy_payment_method_id:
             self.client.payment_method_id = self.secrets.resy_payment_method_id
+
+    async def recover_auth(self, seen_generation: int) -> bool:
+        """Re-login after an auth failure, once, on behalf of every engine.
+
+        Every target runs its own task, so an expired token surfaces as a burst
+        of simultaneous AuthErrors. `seen_generation` is the auth epoch the
+        caller was using: if another task has already re-logged-in since then,
+        this returns immediately instead of stampeding the login endpoint.
+        """
+        async with self._auth_lock:
+            if self._auth_generation != seen_generation:
+                return True  # somebody else already fixed it
+
+            if self.secrets.resy_auth_token:
+                log.error(
+                    "RESY_AUTH_TOKEN was rejected and cannot be refreshed automatically. "
+                    "Grab a fresh token from the browser, or switch to RESY_EMAIL/RESY_PASSWORD."
+                )
+                await self.notifier.send(
+                    "James IV: token expired",
+                    "RESY_AUTH_TOKEN was rejected. The bot cannot book until you replace it.",
+                    priority=PRIORITY_URGENT,
+                )
+                return False
+
+            try:
+                await self.login()
+            except Exception as exc:
+                log.error("Re-authentication failed: %s", exc)
+                await self.notifier.send(
+                    "James IV: re-auth failed",
+                    f"{exc}\nStill running and will keep retrying, but cannot book right now.",
+                    priority=PRIORITY_HIGH,
+                )
+                return False
+
+            self._auth_generation += 1
+            log.warning("Re-authenticated successfully (auth generation %d)", self._auth_generation)
+            return True
 
     async def resolve_venue(self, target: Target) -> int:
         """Slug -> venue id, cached. Configured `venue_id` short-circuits the lookup."""
@@ -97,6 +138,7 @@ class Hunter:
         """Every acceptable slot across the given days, best-first."""
         venue_id = await self.resolve_venue(target)
         found: list[Slot] = []
+        now = now_nyc()
 
         for day in days:
             for party_size in target.party_sizes:
@@ -111,17 +153,26 @@ class Hunter:
                     log.warning("Rate limited; backing off %.0fs", exc.retry_after)
                     await asyncio.sleep(exc.retry_after)
                     return best_slots(target, found)
+                except AuthError:
+                    # Must escape: AuthError subclasses ResyError, and swallowing
+                    # it here would leave the bot polling forever against a dead
+                    # session, finding nothing and never telling anyone.
+                    raise
                 except ResyError as exc:
                     log.debug("find failed for %s on %s: %s", target.name, day, exc)
                     continue
 
-                if slots:
-                    found.extend(slots)
-                    # The requested party size returned inventory, so there is no
-                    # reason to spend requests probing fallback sizes on this day.
+                # Filter here rather than after the loop: a party size that
+                # returns only slots we would reject (wrong time, too soon, wrong
+                # room) has not actually produced inventory, and we should still
+                # try the fallback size. Breaking on the raw list would silently
+                # skip a bookable 3-top because a useless 2-top existed.
+                matched = [s for s in slots if slot_matches(target, s, now=now)]
+                found.extend(matched)
+                if matched:
                     break
 
-        return best_slots(target, found)
+        return best_slots(target, found, now=now)
 
     # ---------------------------------------------------------------- actions
 
@@ -174,6 +225,8 @@ class Hunter:
                 log.warning("Rate limited mid-booking; backing off %.0fs", exc.retry_after)
                 await asyncio.sleep(exc.retry_after)
                 return None
+            except AuthError:
+                raise  # see search(): never let this be mistaken for a dead slot
             except ResyError as exc:
                 log.error("Booking error on %s: %s", slot, exc)
                 continue
@@ -272,10 +325,15 @@ class Hunter:
                 log.info("%s satisfied (%d booking(s)); stopping poll", target.name,
                          target.max_bookings)
                 return
+            generation = self._auth_generation
             try:
                 await self.poll_once(target)
             except AuthError:
-                raise
+                # Never fatal: an expired session at 3am must not silently take
+                # the whole bot down before a 9am drop.
+                if not await self.recover_auth(generation):
+                    await asyncio.sleep(300)
+                continue
             except RateLimited as exc:
                 await asyncio.sleep(exc.retry_after)
                 continue
@@ -303,7 +361,9 @@ class Hunter:
         venue_id = await self.resolve_venue(target)
 
         # Sync the clock and warm the socket while there is still time to spare.
-        offset = await measure_clock_offset(self.client.http, "/3/venue")
+        offset = await measure_clock_offset(
+            self.client.http, "/3/venue", probes=drop.clock_probes
+        )
         if offset.is_trustworthy:
             log.info(
                 "Clock offset vs Resy: %+.3fs (±%.3fs, %d samples)",
@@ -339,16 +399,27 @@ class Hunter:
         landed and we got a shot at it, or the room sold out and no amount of
         further requests will help.
         """
-        deadline = now_utc() + timedelta(seconds=drop.burst_seconds)
+        started = now_utc()
+        deadline = started + timedelta(seconds=drop.burst_seconds)
         attempts = 0
         stop = asyncio.Event()
         result: list[Booking] = []
 
+        seen_inventory = False
+
         async def worker(worker_id: int) -> None:
-            nonlocal attempts
+            nonlocal attempts, seen_inventory
             await asyncio.sleep(worker_id * (drop.burst_interval_ms / 1000.0)
                                 / max(1, drop.burst_concurrency))
             while not stop.is_set() and now_utc() < deadline:
+                if attempts >= drop.max_requests:
+                    log.warning(
+                        "%s: burst request cap (%d) reached; standing down. The poll "
+                        "loop keeps watching for returns.",
+                        target.name, drop.max_requests,
+                    )
+                    stop.set()
+                    return
                 attempts += 1
                 try:
                     for party_size in target.party_sizes:
@@ -358,41 +429,85 @@ class Hunter:
                             party_size=party_size,
                             throttle=False,
                         )
-                        ranked = best_slots(target, slots)
+                        ranked = best_slots(target, slots, now=now_nyc())
                         if not ranked:
                             continue
 
-                        stop.set()
-                        log.warning(
-                            "Drop landed for %s after %d attempts: %d slot(s)",
-                            target.name, attempts, len(ranked),
-                        )
+                        if not seen_inventory:
+                            seen_inventory = True
+                            log.warning(
+                                "Drop landed for %s after %d attempts: %d slot(s)",
+                                target.name, attempts, len(ranked),
+                            )
+
                         if target.action == "book":
                             booking = await self.try_book(target, ranked)
                             if booking is not None:
                                 result.append(booking)
+                                stop.set()
                                 return
-                            await self.alert_slots(target, ranked[:1], missed=True)
+                            if self.config.settings.dry_run:
+                                # try_book declined because of dry run, not
+                                # because we were outraced. Stop, or the
+                                # rehearsal burns the full burst window and
+                                # logs an alarming stream of lost races.
+                                stop.set()
+                                return
+                            # Lost the race on every candidate. Do NOT stop --
+                            # at a busy drop, tables bounce back within seconds
+                            # as other people's holds expire, and the remaining
+                            # burst window is exactly when that happens.
+                            log.info(
+                                "%s: lost every candidate; still hunting for %.0fs",
+                                target.name,
+                                max(0.0, (deadline - now_utc()).total_seconds()),
+                            )
                         else:
                             await self.alert_slots(target, ranked[:3])
-                        return
+                            stop.set()
+                            return
                 except RateLimited as exc:
                     log.warning("Rate limited during burst; pausing %.1fs", exc.retry_after)
                     await asyncio.sleep(exc.retry_after)
+                except AuthError:
+                    stop.set()
+                    raise
                 except ResyError:
                     pass
-                await asyncio.sleep(drop.burst_interval_ms / 1000.0)
+
+                # Decay the cadence once the release window has passed.
+                elapsed = (now_utc() - started).total_seconds()
+                interval = drop.burst_interval_ms / 1000.0
+                if elapsed > drop.aggressive_seconds:
+                    interval *= drop.decay_factor
+                await asyncio.sleep(interval)
 
         await asyncio.gather(*(worker(i) for i in range(drop.burst_concurrency)))
 
         if not result and not stop.is_set():
-            log.warning(
-                "%s: no inventory appeared in %.0fs (%d attempts). Sold out, or the "
-                "drop time / days_ahead in your config is wrong.",
-                target.name, drop.burst_seconds, attempts,
-            )
-            self.store.log_event("snipe-miss", f"{day.isoformat()} after {attempts} attempts",
-                                 target.name)
+            if seen_inventory:
+                # We saw tables and lost every race. Config is fine; we were slow.
+                log.warning(
+                    "%s: inventory appeared but every attempt lost the race (%d attempts). "
+                    "Consider a VPS closer to us-east, or a larger burst_concurrency.",
+                    target.name, attempts,
+                )
+                self.store.log_event("snipe-lost", f"{day.isoformat()} outraced", target.name)
+                await self.notifier.send(
+                    f"Missed the drop: {target.name}",
+                    f"{day:%a %b %-d} inventory appeared but sold out before we booked.",
+                    priority=PRIORITY_HIGH,
+                )
+            else:
+                log.warning(
+                    "%s: NO inventory appeared in %.0fs (%d attempts). Either it sold out "
+                    "before our first request, or drop.at / drop.days_ahead is wrong -- "
+                    "check the venue's booking policy on its Resy page.",
+                    target.name, drop.burst_seconds, attempts,
+                )
+                self.store.log_event(
+                    "snipe-miss", f"{day.isoformat()} after {attempts} attempts", target.name
+                )
         return result[0] if result else None
 
     async def snipe_scheduler(self, target: Target) -> None:
@@ -421,10 +536,15 @@ class Hunter:
             )
             await sleep_until(wake_at)  # aware datetimes compare across zones
 
+            generation = self._auth_generation
             try:
                 await self.snipe(target)
             except AuthError:
-                raise
+                if await self.recover_auth(generation):
+                    try:
+                        await self.snipe(target)  # token was the only problem; go again
+                    except Exception as exc:
+                        log.exception("Snipe retry failed for %s: %s", target.name, exc)
             except Exception as exc:
                 log.exception("Snipe failed for %s: %s", target.name, exc)
 
@@ -459,6 +579,16 @@ class Hunter:
             len(targets), len(tasks) - 1, " [DRY RUN]" if self.config.settings.dry_run else "",
         )
 
+        # A heartbeat on boot is the cheapest possible check that the whole
+        # chain works -- credentials, network, and push delivery -- while you
+        # are watching, rather than at 9am when you are not.
+        await self.notifier.send(
+            "James IV started",
+            self._startup_summary(targets),
+            priority=PRIORITY_LOW,
+            tags=["eyes"],
+        )
+
         try:
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
@@ -467,6 +597,22 @@ class Hunter:
             for task in tasks:
                 task.cancel()
 
+    def _startup_summary(self, targets: list[Target]) -> str:
+        lines = []
+        if self.config.settings.dry_run:
+            lines.append("DRY RUN -- nothing will actually be booked.")
+        now = now_nyc()
+        for target in targets:
+            if target.drop and target.drop.enabled:
+                next_drop = nyc_at(now.date(), target.drop.at)
+                if next_drop <= now:
+                    next_drop = nyc_at(now.date() + timedelta(days=1), target.drop.at)
+                when = humanize_delta((next_drop - now).total_seconds())
+                lines.append(f"{target.name}: {target.action}, next drop in {when}")
+            else:
+                lines.append(f"{target.name}: {target.action}, polling for cancellations")
+        return "\n".join(lines)
+
     async def _reauth_loop(self) -> None:
         """Refresh the session periodically so a long run does not die at 3am."""
         interval = self.config.settings.reauth_interval_hours * 3600
@@ -474,12 +620,6 @@ class Hunter:
             await asyncio.sleep(interval)
             if self.secrets.resy_auth_token:
                 continue  # a pasted token cannot be refreshed
-            try:
-                await self.client.authenticate(self.secrets.resy_email, self.secrets.resy_password)
-            except Exception as exc:
-                log.error("Re-auth failed: %s", exc)
-                await self.notifier.send(
-                    "James IV: re-auth failed",
-                    f"{exc}\nThe bot is still running but may be unable to book.",
-                    priority=PRIORITY_HIGH,
-                )
+            # Via login() rather than client.authenticate() so an explicitly
+            # pinned RESY_PAYMENT_METHOD_ID is re-applied afterwards.
+            await self.recover_auth(self._auth_generation)

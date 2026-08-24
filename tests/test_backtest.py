@@ -1,0 +1,476 @@
+"""Back-tests: the real Hunter against a simulated Resy, over real time.
+
+Each test is a scenario that actually happens in the wild. Several exist
+specifically because they caught a bug -- those are marked REGRESSION.
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+
+from jamesiv.config import Config, Secrets, Settings, Target
+from jamesiv.hunter import Hunter
+from jamesiv.models import AuthError
+from jamesiv.notify import Notifier
+from jamesiv.resy import ResyClient
+from jamesiv.simulator import VENUE_ID, SimResy, slot_at, slot_relative
+from jamesiv.state import Store
+from jamesiv.timeutil import now_nyc
+
+
+class RecordingNotifier(Notifier):
+    def __init__(self):
+        super().__init__(Secrets())
+        self.sent: list[tuple[str, str]] = []
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    async def send(self, title, message, **kwargs):
+        self.sent.append((title, message))
+
+    def titles(self) -> str:
+        return " | ".join(t for t, _ in self.sent)
+
+
+def build_target(**kwargs) -> Target:
+    defaults = dict(
+        name="Torrisi",
+        slug="torrisi",
+        venue_id=VENUE_ID,
+        party_size=2,
+        action="book",
+        earliest="17:00",
+        latest="22:00",
+        days_ahead_min=0,
+        days_ahead_max=35,
+    )
+    defaults.update(kwargs)
+    return Target(**defaults)
+
+
+async def make_hunter(tmp_path, target, **settings_kwargs):
+    settings = Settings(state_path=str(tmp_path / "bt.db"), **settings_kwargs)
+    config = Config(settings=settings, targets=[target])
+    secrets = Secrets(resy_email="sim@example.com", resy_password="pw")
+    client = ResyClient(rate=200, burst=200)
+    notifier = RecordingNotifier()
+    store = Store(settings.state_path)
+    hunter = Hunter(
+        config=config, secrets=secrets, client=client, store=store, notifier=notifier
+    )
+    return hunter, client, notifier, store
+
+
+@pytest.fixture
+async def rig(tmp_path):
+    """Yields a factory; tears down the client and store afterwards."""
+    made = []
+
+    async def _factory(target, **settings_kwargs):
+        hunter, client, notifier, store = await make_hunter(tmp_path, target, **settings_kwargs)
+        made.append((client, store))
+        return hunter, notifier
+
+    yield _factory
+
+    for client, store in made:
+        await client.aclose()
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# Scenario 1: somebody cancels and a table appears mid-poll. The bread and
+# butter of this bot, and the case the user asked about directly.
+# ---------------------------------------------------------------------------
+
+
+async def test_books_a_cancellation_that_appears_between_polls(rig):
+    sim = SimResy()
+    with sim.mock():
+        hunter, notifier = await rig(build_target())
+        await hunter.login()
+
+        # First poll: the restaurant is full.
+        assert await hunter.poll_once(hunter.config.targets[0]) is None
+        assert sim.booked == []
+
+        # Someone cancels a 7:30pm table three weeks out.
+        sim.add(slot_at(21, "19:30"))
+
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is not None
+    assert len(sim.booked) == 1
+    assert sim.booked[0].start.hour == 19
+    assert "Booked" in notifier.titles()
+
+
+async def test_a_cancellation_today_is_booked_when_it_is_far_enough_out(rig):
+    sim = SimResy()
+    # Tonight, four hours from now -- reachable, so we want it.
+    tonight = slot_relative(minutes_from_now=240)
+    if not (17 <= tonight.start.hour <= 21):
+        pytest.skip("wall clock puts the synthetic slot outside dining hours")
+
+    with sim.mock():
+        sim.add(tonight)
+        hunter, _ = await rig(build_target(days_ahead_min=0, days_ahead_max=1))
+        await hunter.login()
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is not None
+    assert len(sim.booked) == 1
+
+
+# REGRESSION: `slot_matches` checked time-of-day but not whether the slot had
+# already happened, so a poll at 8pm would try to book tonight's 7pm table.
+async def test_does_not_book_a_table_that_has_already_passed(rig):
+    sim = SimResy()
+    with sim.mock():
+        sim.add(slot_relative(minutes_from_now=-120))   # two hours ago
+        sim.add(slot_relative(minutes_from_now=20))     # unreachably soon
+        hunter, _ = await rig(build_target(
+            days_ahead_min=0, days_ahead_max=1, earliest="00:00", latest="23:59",
+            min_lead_minutes=90,
+        ))
+        await hunter.login()
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is None
+    assert sim.booked == []
+    assert sim.details_calls == 0, "must not even request details for an unbookable slot"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 2: the drop. Inventory materialises at an instant and the room is
+# gone in seconds.
+# ---------------------------------------------------------------------------
+
+
+async def test_snipes_inventory_the_moment_it_is_released(rig):
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=3)).strftime("%H:%M:%S"),
+                "lead_ms": 300,
+                "burst_seconds": 6,
+                "burst_concurrency": 3,
+                "burst_interval_ms": 60,
+                "clock_probes": 3,
+            },
+        )
+        hunter, notifier = await rig(target)
+        await hunter.login()
+
+        # The venue releases its 30-days-out inventory in 3 seconds.
+        sim.release_in(3.0, slot_at(30, "19:00"), slot_at(30, "20:45"))
+
+        booking = await hunter.snipe(target)
+
+    assert booking is not None, "snipe failed to catch the drop"
+    assert len(sim.booked) == 1
+    assert sim.booked[0].start.hour == 19, "should take the better-ranked 7pm slot"
+    assert sim.find_calls > 1, "should have been polling before inventory landed"
+    assert "Booked" in notifier.titles()
+
+
+# REGRESSION: the burst used to stop the instant it saw inventory, so losing
+# the first race ended the snipe -- even though tables bounce back within
+# seconds as competitors' holds lapse.
+async def test_keeps_hunting_after_losing_the_first_races(rig):
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=2)).strftime("%H:%M:%S"),
+                "lead_ms": 200,
+                "burst_seconds": 8,
+                "burst_concurrency": 2,
+                "burst_interval_ms": 80,
+                "clock_probes": 3,
+            },
+        )
+        hunter, _ = await rig(target)
+        await hunter.login()
+
+        # Two competitors beat us to this table before their holds lapse.
+        sim.release_in(2.0, slot_at(30, "19:00", contested=2))
+
+        booking = await hunter.snipe(target)
+
+    assert booking is not None, "gave up after losing a race instead of retrying"
+    assert sim.book_calls >= 3, "should have retried through the contested attempts"
+    assert len(sim.booked) == 1
+
+
+async def test_a_drop_that_never_lands_fails_cleanly_and_says_why(rig):
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_seconds": 2,
+                "burst_concurrency": 2,
+                "burst_interval_ms": 100,
+                "clock_probes": 2,
+            },
+        )
+        hunter, notifier = await rig(target)
+        await hunter.login()
+
+        booking = await hunter.snipe(target)   # no inventory ever released
+
+    assert booking is None
+    assert sim.booked == []
+    assert sim.find_calls > 0
+    # Nothing was ever seen, so this is a config problem, not a lost race --
+    # and the bot must not claim it was outraced.
+    assert "Missed the drop" not in notifier.titles()
+
+
+# ---------------------------------------------------------------------------
+# Scenario 3: things going wrong in the middle of an unattended run.
+# ---------------------------------------------------------------------------
+
+
+# REGRESSION: an AuthError used to propagate out of poll_loop and kill every
+# engine, including a snipe scheduled for the next morning.
+async def test_recovers_from_an_expired_session_without_dying(rig):
+    sim = SimResy()
+    with sim.mock():
+        hunter, notifier = await rig(build_target())
+        await hunter.login()
+        first_login_count = sim.login_calls
+
+        # The session goes stale, as it does on a long-running bot.
+        sim.expire_session()
+        sim.add(slot_at(21, "19:30"))
+
+        generation = hunter._auth_generation
+        # The stale session must surface as AuthError specifically. It used to be
+        # swallowed by `except ResyError` (AuthError subclasses it), which left
+        # the bot polling a dead session forever without ever alerting.
+        with pytest.raises(AuthError):
+            await hunter.poll_once(hunter.config.targets[0])
+
+        assert await hunter.recover_auth(generation) is True
+        assert sim.login_calls == first_login_count + 1
+
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is not None, "should book normally once the session is refreshed"
+    assert len(sim.booked) == 1
+
+
+async def test_a_rate_limit_backs_off_rather_than_crashing(rig):
+    sim = SimResy()
+    sim.rate_limit_on_find = 1
+    with sim.mock():
+        hunter, _ = await rig(build_target(days_ahead_min=0, days_ahead_max=2))
+        await hunter.login()
+        sim.add(slot_at(1, "19:30"))
+
+        # First find is 429'd; search absorbs it and returns what it has.
+        result = await hunter.poll_once(hunter.config.targets[0])
+        assert result is None
+
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is not None
+    assert len(sim.booked) == 1
+
+
+# REGRESSION: search broke out of the party-size loop on *any* returned slot,
+# so a useless 2-top hid a bookable 3-top from the fallback size.
+async def test_falls_back_to_a_larger_party_when_the_first_size_is_useless(rig):
+    sim = SimResy()
+    with sim.mock():
+        # Party of 2 exists but only at 4pm, outside the target's window.
+        sim.add(slot_at(14, "16:00", party=2))
+        # Party of 3 has a perfect 7:30pm.
+        sim.add(slot_at(14, "19:30", party=3))
+
+        hunter, _ = await rig(build_target(
+            party_size=2, party_size_fallback=[3], days_ahead_min=14, days_ahead_max=14,
+        ))
+        await hunter.login()
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is not None, "fallback party size was never probed"
+    assert sim.booked[0].party_size == 3
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4: the safety rails, under simulation rather than with a fake client.
+# ---------------------------------------------------------------------------
+
+
+async def test_dry_run_finds_the_table_and_refuses_to_book_it(rig):
+    sim = SimResy()
+    with sim.mock():
+        sim.add(slot_at(21, "19:30"))
+        hunter, notifier = await rig(build_target(), dry_run=True)
+        await hunter.login()
+        booking = await hunter.poll_once(hunter.config.targets[0])
+
+    assert booking is None
+    assert sim.booked == []
+    assert sim.book_calls == 0
+    assert sim.details_calls == 0
+    assert "dry run" in notifier.titles().lower()
+
+
+async def test_never_books_the_same_target_twice(rig):
+    sim = SimResy()
+    with sim.mock():
+        sim.add(slot_at(21, "19:30"), slot_at(22, "20:00"))
+        target = build_target(max_bookings=1)
+        hunter, _ = await rig(target)
+        await hunter.login()
+
+        assert await hunter.poll_once(target) is not None
+        assert await hunter.poll_once(target) is None
+
+    assert len(sim.booked) == 1
+
+
+async def test_the_global_budget_stops_booking_across_targets(rig):
+    sim = SimResy()
+    with sim.mock():
+        sim.add(slot_at(21, "19:30"), slot_at(22, "20:00"), slot_at(23, "19:00"))
+        target = build_target(max_bookings=5)
+        hunter, _ = await rig(target, max_bookings_per_run=2)
+        await hunter.login()
+
+        for _ in range(4):
+            await hunter.poll_once(target)
+
+    assert len(sim.booked) == 2, "global per-run ceiling was not enforced"
+
+
+async def test_a_booking_survives_a_restart(rig, tmp_path):
+    sim = SimResy()
+    with sim.mock():
+        sim.add(slot_at(21, "19:30"), slot_at(22, "20:00"))
+        target = build_target(max_bookings=1)
+
+        hunter, _ = await rig(target)
+        await hunter.login()
+        assert await hunter.poll_once(target) is not None
+
+        # A second process starting against the same state directory.
+        restarted, _ = await rig(target)
+        await restarted.login()
+        assert await restarted.poll_once(target) is None
+
+    assert len(sim.booked) == 1, "restart re-booked a target that was already satisfied"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 5: politeness. A burst that sustains 20 req/s for its whole window
+# is both useless (the room sold out in the first two seconds) and a good way
+# to get an account flagged.
+# ---------------------------------------------------------------------------
+
+
+async def test_a_fruitless_burst_stops_at_its_request_cap(rig):
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_seconds": 30,      # would run for 30s...
+                "max_requests": 25,       # ...but the cap should end it far sooner
+                "burst_concurrency": 3,
+                "burst_interval_ms": 50,
+                "aggressive_seconds": 30,
+                "clock_probes": 2,
+            },
+        )
+        hunter, _ = await rig(target)
+        await hunter.login()
+
+        started = now_nyc()
+        assert await hunter.snipe(target) is None
+        elapsed = (now_nyc() - started).total_seconds()
+
+    assert sim.find_calls <= 25 + target.drop.burst_concurrency, (
+        f"burst cap not enforced: {sim.find_calls} requests"
+    )
+    assert elapsed < 20, "should have stood down early rather than burning the full window"
+
+
+async def test_the_burst_cadence_decays_after_the_release_window(rig):
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_seconds": 6,
+                "burst_concurrency": 1,
+                "burst_interval_ms": 100,
+                "aggressive_seconds": 1.5,   # 1.5s hard, then 10x slower
+                "decay_factor": 10.0,
+                "max_requests": 500,
+                "clock_probes": 2,
+            },
+        )
+        hunter, _ = await rig(target)
+        await hunter.login()
+        await hunter.snipe(target)
+
+    # Undecayed, 6s at 100ms would be ~60 requests. With decay after 1.5s the
+    # tail runs at 1/s, so the total lands far below that.
+    assert sim.find_calls < 35, f"cadence did not decay: {sim.find_calls} requests"
+    assert sim.find_calls > 8, "decayed so hard it stopped hunting"
+
+
+async def test_dry_run_stops_the_burst_instead_of_faking_lost_races(rig):
+    """REGRESSION: dry-run made try_book return None, which the burst read as
+    being outraced -- so a rehearsal burned the whole window and logged a
+    stream of alarming 'lost every candidate' lines."""
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_seconds": 20,
+                "burst_concurrency": 2,
+                "burst_interval_ms": 100,
+                "clock_probes": 2,
+            },
+        )
+        hunter, notifier = await rig(target, dry_run=True)
+        await hunter.login()
+        sim.release_in(1.0, slot_at(30, "19:00"))
+
+        started = now_nyc()
+        result = await hunter.snipe(target)
+        elapsed = (now_nyc() - started).total_seconds()
+
+    assert result is None
+    assert sim.booked == []
+    assert sim.book_calls == 0
+    assert elapsed < 10, f"burst ran {elapsed:.0f}s instead of standing down on dry run"
+    assert "dry run" in notifier.titles().lower()

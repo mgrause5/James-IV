@@ -7,7 +7,7 @@ bug is a booked table you did not want at a restaurant you cannot cancel.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from .config import Target
 from .models import Slot
@@ -48,11 +48,22 @@ def drop_target_day(target: Target, today: date) -> date | None:
     return day
 
 
-def slot_matches(target: Target, slot: Slot) -> bool:
-    """Would we accept this table at all?"""
+def slot_matches(target: Target, slot: Slot, *, now: datetime | None = None) -> bool:
+    """Would we accept this table at all?
+
+    `now` enables the lead-time check, and callers hunting same-day
+    cancellations must pass it. Resy happily returns tonight's 7pm slot to a
+    query made at 8pm, and without this the bot would try to book a table that
+    has already been sat -- or one 20 minutes out that you cannot possibly get
+    to. Left as None the check is skipped, which is what the ranking tests want.
+    """
     t = slot.start.time()
     if t < target.earliest or t > target.latest:
         return False
+    if now is not None:
+        lead_minutes = (slot.start - now).total_seconds() / 60.0
+        if lead_minutes < target.min_lead_minutes:
+            return False
     if not target.seating_allowed(slot.seating_type):
         return False
     if target.dates and slot.day not in target.dates:
@@ -81,9 +92,9 @@ def slot_sort_key(target: Target, slot: Slot) -> tuple:
     )
 
 
-def best_slots(target: Target, slots: list[Slot]) -> list[Slot]:
+def best_slots(target: Target, slots: list[Slot], *, now: datetime | None = None) -> list[Slot]:
     """Filter to acceptable slots and rank them best-first."""
-    matched = [s for s in slots if slot_matches(target, s)]
+    matched = [s for s in slots if slot_matches(target, s, now=now)]
     matched.sort(key=lambda s: slot_sort_key(target, s))
     return matched
 

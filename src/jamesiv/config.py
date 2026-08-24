@@ -103,6 +103,18 @@ class DropConfig(BaseModel):
     # Parallel in-flight `find` requests during the burst.
     burst_concurrency: int = Field(default=3, ge=1, le=10)
     burst_interval_ms: int = Field(default=150, ge=50, le=5000)
+    # Inventory either lands within a few seconds of the release or it is not
+    # coming. Poll hard for this long, then decay to a slower cadence rather
+    # than sustaining 20 req/s for the whole burst window.
+    aggressive_seconds: float = Field(default=5.0, ge=0.5, le=60)
+    decay_factor: float = Field(default=5.0, ge=1.0, le=50)
+    # Hard ceiling on find requests per burst, across all workers. A 20-second
+    # burst at full tilt is ~400 requests, which is both useless (the room sold
+    # out in the first two seconds) and a good way to get flagged.
+    max_requests: int = Field(default=120, ge=10, le=2000)
+    # HEAD probes used to measure clock skew before firing. More probes is a
+    # tighter bound; the scheduler wakes 75s early so the default costs nothing.
+    clock_probes: int = Field(default=12, ge=2, le=40)
 
     @field_validator("at", mode="before")
     @classmethod
@@ -132,6 +144,10 @@ class Target(BaseModel):
 
     earliest: time = Field(default=time(17, 0))
     latest: time = Field(default=time(21, 30))
+    # Ignore tables starting sooner than this. Same-day cancellation hunting
+    # otherwise surfaces slots that have already been sat, or ones you could
+    # not physically reach. Set to 0 if you live upstairs.
+    min_lead_minutes: int = Field(default=90, ge=0, le=10080)
     # Ranked preferences. A slot inside windows[0] beats one inside windows[1].
     preferred_windows: list[TimeWindow] = Field(default_factory=list)
 

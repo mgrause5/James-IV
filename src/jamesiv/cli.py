@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import typer
@@ -13,7 +13,7 @@ from rich.logging import RichHandler
 from rich.table import Table
 
 from . import __version__
-from .config import Config, Secrets, load_config, load_secrets
+from .config import Config, DropConfig, Secrets, load_config, load_secrets
 from .hunter import Hunter
 from .matching import candidate_days, describe_target, drop_target_day
 from .models import ResyError
@@ -204,6 +204,214 @@ def venue(
         console.print(f"[green]{found.name}[/] -> venue_id: [bold]{found.id}[/]")
 
     asyncio.run(_with_hunter(config, secrets, _venue))
+
+
+@app.command()
+def window(
+    slug: str = typer.Argument(..., help="Resy URL slug."),
+    days: int = typer.Option(45, "--days", "-d", help="How many days ahead to probe."),
+    party: int = typer.Option(2, "--party", "-p"),
+    location: str = typer.Option("ny", "--location", "-l"),
+    config_path: str = typer.Option(DEFAULT_CONFIG, "--config", "-c"),
+) -> None:
+    """Probe a venue's booking horizon, to find its `days_ahead` without guessing.
+
+    Walks forward day by day and reports where inventory exists. The furthest
+    date with any availability is a lower bound on the booking window -- which
+    is the number you want for `drop.days_ahead`. Run it right after a drop,
+    when the newly released day is still the far edge and easy to spot.
+    """
+    config, secrets = _load(config_path)
+
+    async def _window(hunter: Hunter):
+        await hunter.login()
+        venue = await hunter.client.venue_by_slug(slug, location=location)
+        console.print(f"Probing [bold]{venue.name}[/] for party of {party}, {days} days out\n")
+
+        today = today_nyc()
+        rows: list[tuple[date, int, str]] = []
+        furthest: date | None = None
+
+        with console.status("probing...") as status_line:
+            for offset in range(days + 1):
+                day = today + timedelta(days=offset)
+                status_line.update(f"probing {day} ({offset}/{days})")
+                slots = await hunter.client.find(
+                    venue_id=venue.id, day=day.isoformat(), party_size=party
+                )
+                if slots:
+                    furthest = day
+                    times = ", ".join(s.clock for s in slots[:4])
+                    if len(slots) > 4:
+                        times += f", +{len(slots) - 4} more"
+                    rows.append((day, len(slots), times))
+
+        if not rows:
+            console.print(
+                "[yellow]No availability anywhere in that range.[/] Either the venue is fully "
+                "booked, or the slug is wrong. Try a wider --days or a different --party."
+            )
+            return
+
+        table = Table(header_style="bold")
+        table.add_column("Date")
+        table.add_column("Out", justify="right")
+        table.add_column("Slots", justify="right")
+        table.add_column("Times")
+        for day, count, times in rows:
+            table.add_row(
+                day.strftime("%a %b %-d"), f"{(day - today).days}d", str(count), times
+            )
+        console.print(table)
+
+        out = (furthest - today).days
+        console.print(
+            f"\nFurthest date with inventory: [bold]{furthest}[/] "
+            f"([bold]{out} days out[/])."
+        )
+        console.print(
+            "[dim]That is a lower bound on the booking window. If it lines up with a round "
+            "number (14/21/30/60), that is almost certainly your drop.days_ahead.[/]"
+        )
+
+    asyncio.run(_with_hunter(config, secrets, _window))
+
+
+@app.command()
+def simulate(
+    target_name: str = typer.Argument(..., help="Target name or slug from your config."),
+    scenario: str = typer.Option(
+        "drop", "--scenario", "-s", help="drop | cancellation | contested | soldout"
+    ),
+    config_path: str = typer.Option(DEFAULT_CONFIG, "--config", "-c"),
+) -> None:
+    """Rehearse a target against a simulated Resy. No credentials, no real booking.
+
+    This runs your actual target config -- your windows, your seating
+    preferences, your drop timing -- through the real hunting code against a
+    fake venue. It is the honest way to find out that `days_ahead` is wrong, or
+    that your time window excludes everything, before 9am on a Friday.
+    """
+    from .simulator import VENUE_ID, SimResy, slot_at
+
+    config, _ = _load(config_path)
+    target = config.target(target_name)
+    if target is None:
+        console.print(f"[red]No target named {target_name!r}[/]")
+        raise typer.Exit(1)
+
+    target = target.model_copy(deep=True)
+    target.venue_id = VENUE_ID
+    days_out = target.drop.days_ahead if target.drop else max(1, target.days_ahead_min)
+
+    # Place the synthetic tables in the middle of whatever window the user asked
+    # for, so the simulation tests their ranking rather than our guess at it.
+    hhmm = _midpoint(target)
+    sim = SimResy()
+    secrets = Secrets(resy_email="sim@example.com", resy_password="simulated")
+
+    console.print(f"[bold]Simulating:[/] {target.name}  [dim]({scenario})[/]")
+    console.print(f"[dim]{describe_target(target)}[/]\n")
+
+    async def _sim():
+        client = _make_client(config, secrets)
+        notifier = Notifier(Secrets())          # no channels: alerts go to the log
+        store = Store(":memory:")
+        hunter = Hunter(
+            config=Config(settings=config.settings, targets=[target]),
+            secrets=secrets, client=client, store=store, notifier=notifier,
+        )
+        try:
+            with sim.mock():
+                await hunter.login()
+
+                if scenario == "cancellation":
+                    # Place it on a date the target would actually check, so
+                    # this exercises the user's real weekday/date filters
+                    # instead of quietly bypassing them.
+                    days = candidate_days(target, today_nyc())
+                    if not days:
+                        console.print(
+                            "[red]This target has no candidate dates at all.[/] Its "
+                            "weekday/date filters and days_ahead range do not overlap, "
+                            "so it would never find anything. Fix that first."
+                        )
+                        return None
+                    day = days[len(days) // 2]
+                    offset = (day - today_nyc()).days
+                    console.print(
+                        f"[dim]A table appears mid-poll on {day:%a %b %-d} "
+                        f"({offset}d out)...[/]"
+                    )
+                    sim.add(slot_at(offset, hhmm))
+                    result = await hunter.poll_once(target)
+
+                elif scenario == "soldout":
+                    console.print("[dim]Nothing is ever released...[/]")
+                    result = await _sim_drop(hunter, target, sim, None, hhmm, days_out)
+
+                elif scenario == "contested":
+                    console.print("[dim]Two competitors hold the table first...[/]")
+                    result = await _sim_drop(hunter, target, sim, 2, hhmm, days_out)
+
+                else:  # drop
+                    console.print("[dim]Inventory drops in a few seconds...[/]")
+                    result = await _sim_drop(hunter, target, sim, 0, hhmm, days_out)
+
+            console.print()
+            if result is not None:
+                console.print(f"[green bold]WOULD BOOK[/] {result.slot}")
+            elif sim.booked:
+                console.print(f"[green]Booked in simulation:[/] {sim.booked[0].start}")
+            else:
+                console.print("[yellow]No booking in this scenario.[/]")
+            console.print(
+                f"[dim]{sim.find_calls} find, {sim.details_calls} details, "
+                f"{sim.book_calls} book request(s)[/]"
+            )
+            if config.settings.dry_run:
+                console.print(
+                    "[dim]Your config has dry_run: true -- that is why nothing booked.[/]"
+                )
+        finally:
+            await client.aclose()
+            await notifier.aclose()
+            store.close()
+
+    asyncio.run(_sim())
+
+
+async def _sim_drop(hunter, target, sim, contested, hhmm, days_out):
+    """Arm a real snipe against simulated inventory a few seconds out."""
+    from .simulator import slot_at
+
+    lead = 4.0
+    if target.drop is None:
+        target.drop = DropConfig()
+    target.drop = target.drop.model_copy(
+        update={
+            "at": (now_nyc() + timedelta(seconds=lead)).time(),
+            "burst_seconds": min(target.drop.burst_seconds, 10.0),
+            "clock_probes": 4,
+        }
+    )
+    # The drop scenarios fire on an arbitrary synthetic date, so the weekday
+    # and date filters are lifted for the rehearsal. `--scenario cancellation`
+    # is the one that tests those filters for real.
+    target.weekdays = []
+    target.dates = []
+    if contested is not None:
+        sim.release_in(lead, slot_at(days_out, hhmm, contested=contested))
+    return await hunter.snipe(target)
+
+
+def _midpoint(target) -> str:
+    """A wall-clock time inside the target's most-preferred window."""
+    window = target.preferred_windows[0] if target.preferred_windows else None
+    lo = window.start if window else target.earliest
+    hi = window.end if window else target.latest
+    minutes = (lo.hour * 60 + lo.minute + hi.hour * 60 + hi.minute) // 2
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 @app.command()

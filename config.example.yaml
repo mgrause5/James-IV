@@ -27,24 +27,27 @@ settings:
 
 targets:
   # ---------------------------------------------------------------------
-  # A drop-time snipe. This is the pattern for rooms that sell out the
-  # instant inventory is released.
+  # A drop-time snipe -- the pattern for rooms that sell out the instant
+  # inventory is released.
   #
-  # Find `at` and `days_ahead` on the venue's Resy page -- the booking policy
-  # is stated in the notes ("Reservations open 30 days in advance at 9AM").
-  # Getting these two wrong is the single most common reason a snipe finds
-  # nothing, so check them rather than assuming.
+  # `drop.at` and `drop.days_ahead` are the two settings that decide whether
+  # this works at all. They are on the venue's Resy page, in the booking
+  # policy notes ("Reservations open 30 days in advance at 9AM"). Do not
+  # guess them: run `james window torrisi` to see the current booking
+  # horizon, and `james simulate Torrisi` to rehearse the whole thing.
   # ---------------------------------------------------------------------
-  - name: Tatiana
-    slug: tatiana-by-kwame-onwuachi
+  - name: Torrisi
+    slug: torrisi
     party_size: 2
     action: book
 
+    # Friday tables, 30 days out. The range is wider than days_ahead so the
+    # poll engine also catches cancellations either side of the drop.
     days_ahead_min: 25
     days_ahead_max: 35
-    weekdays: [thu, fri, sat]
+    weekdays: [fri]
 
-    earliest: "17:30"
+    earliest: "18:00"
     latest: "21:30"
     preferred_windows:
       - { start: "19:00", end: "20:30" }   # first choice
@@ -62,6 +65,12 @@ targets:
       burst_seconds: 20
       burst_concurrency: 3
       burst_interval_ms: 150
+      # Poll hard for this long, then decay. Inventory either lands within a
+      # few seconds of the release or it is not coming, and sustaining 20
+      # requests/second for a full 20s window is how accounts get flagged.
+      aggressive_seconds: 5
+      decay_factor: 5
+      max_requests: 120  # hard ceiling on find requests per burst
 
     poll_interval_seconds: 60
     max_bookings: 1
@@ -86,6 +95,11 @@ targets:
     latest: "21:00"
     preferred_windows:
       - { start: "19:00", end: "20:30" }
+
+    # Ignore anything starting sooner than this. Same-day cancellation hunting
+    # otherwise surfaces tables you cannot physically get to -- and Resy will
+    # happily return tonight's 7pm slot to a query you make at 8pm.
+    min_lead_minutes: 120
 
     poll_interval_seconds: 45
     poll_jitter: 0.35

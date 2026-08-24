@@ -35,6 +35,95 @@ james run               # start hunting (config ships with dry_run: true)
 bot will find and rank tables and tell you exactly what it *would* have booked,
 without touching your card. Once the picks look right, set `dry_run: false`.
 
+## Your credentials
+
+Your Resy email and password go in `.env` **on the machine that runs the bot**,
+and nowhere else. That file is gitignored and never leaves the box.
+
+Don't paste them into a chat window, a commit, or an issue — anything you type
+into an AI assistant lands in a transcript. Nobody needs your login to work on
+this code: the whole test suite runs against a simulated Resy (`simulator.py`),
+and `james simulate` will rehearse your real config without any credentials at
+all.
+
+If you'd rather not put a password on the VPS, `RESY_AUTH_TOKEN` takes a token
+copied out of your browser instead. It expires after a while and can't be
+auto-refreshed, so for a bot meant to run unattended for weeks the
+email/password path is the more reliable one.
+
+## Fully automated: the Torrisi case
+
+The goal is that Torrisi releases Friday tables 30 days out and you do nothing.
+Here's the whole path.
+
+**1. Find the venue and confirm its booking window.**
+
+```bash
+james venue torrisi              # slug -> venue id
+james window torrisi --days 45   # where does inventory actually exist?
+```
+
+`window` walks forward day by day and reports the furthest date with
+availability. If that lands on a round number — 30 days out — that's your
+`drop.days_ahead`. Run it shortly after a drop, when the newly released day is
+still the far edge and obvious.
+
+**2. Get the release time from the venue, not from a guess.** It's in the
+booking policy notes on the venue's Resy page ("Reservations open 30 days in
+advance at 9AM"). This is the single most common reason a snipe fires into an
+empty result set, and no amount of code can infer it.
+
+**3. Write the target.**
+
+```yaml
+- name: Torrisi
+  slug: torrisi
+  party_size: 2
+  action: book
+  weekdays: [fri]        # Fridays only
+  days_ahead_min: 25     # wider than days_ahead, so the poll engine also
+  days_ahead_max: 35     # catches cancellations either side of the drop
+  earliest: "18:00"
+  latest: "21:30"
+  preferred_windows:
+    - { start: "19:00", end: "20:30" }
+  drop:
+    at: "09:00:00"
+    days_ahead: 30
+  max_bookings: 1
+```
+
+**4. Rehearse it before trusting it.**
+
+```bash
+james simulate Torrisi --scenario drop          # inventory lands; do we catch it?
+james simulate Torrisi --scenario contested     # competitors hold it first
+james simulate Torrisi --scenario cancellation  # a table appears mid-poll
+james simulate Torrisi --scenario soldout       # nothing is ever released
+```
+
+This runs your *actual* target config — your windows, your seating preferences,
+your drop timing — through the real hunting code against a fake venue. No
+credentials, no real booking. It's how you find out that `days_ahead` is wrong,
+or that your time window excludes everything, on a Tuesday afternoon rather than
+at 9am on a Friday.
+
+**5. Check the real thing, then let it run.**
+
+```bash
+james doctor        # credentials, payment method, every venue slug
+james test-notify   # confirm push actually reaches your phone
+docker compose up -d
+```
+
+That's it. `snipe_scheduler` wakes ~75 seconds before 9:00:00 every day, syncs
+the clock, warms the connection, and fires. If today's release date isn't a
+Friday it skips and sleeps until tomorrow. When it books, `max_bookings: 1`
+stops that target for good and you get a push notification.
+
+Meanwhile the poll engine is independently watching days 25–35 for
+cancellations, so you're covered between drops too.
+
 ## Configuring a target
 
 ```yaml
@@ -90,6 +179,8 @@ Omit the `drop:` block entirely for a pure cancellation hunter.
 | `james snipe <target>` | Arm a single drop and exit after it fires. `--now` to fire immediately. |
 | `james status` | Confirmed bookings, target schedule, recent activity. |
 | `james venue <slug>` | Resolve a Resy URL slug to a venue id. |
+| `james window <slug>` | Probe the booking horizon, to find `days_ahead` without guessing. |
+| `james simulate <target>` | Rehearse a target against a simulated Resy. No credentials, no booking. |
 | `james cancel <token>` | Cancel a reservation the bot booked. |
 | `james test-notify` | Send a test push, so you find out now and not at 9am. |
 
@@ -105,6 +196,14 @@ docker compose logs -f
 The container pins `TZ=America/New_York`, because every drop time in this bot is
 NYC wall clock. State lives in `./state`, mounted as a volume, so bookings and
 alert dedupe survive a restart. `config.yaml` is mounted read-only.
+
+The container runs as uid 1000, so create the state directory with matching
+ownership before the first run, or the bind mount lands root-owned and SQLite
+can't write to it:
+
+```bash
+mkdir -p state && sudo chown 1000:1000 state
+```
 
 Any $5/month VPS is plenty. Put it in a US East region if you have the choice —
 you are competing on round-trip latency at 9:00:00.000 and the difference
@@ -129,6 +228,17 @@ path, and pre-resolves the venue id. When the burst fires, `find` requests bypas
 the rate limiter; the moment inventory appears it goes straight to
 `details` → `book` with no ranking round trip wasted.
 
+The burst is budgeted rather than open-ended. Inventory either lands within a few
+seconds of the release or it isn't coming, so the cadence runs hard for
+`aggressive_seconds` and then decays, with `max_requests` as a hard ceiling.
+Left ungoverned a 20-second burst is ~400 requests, which is simultaneously
+useless — the room sold out in the first two seconds — and an excellent way to
+get an account flagged.
+
+Losing the first race is not the end of the burst. Tables bounce back within
+seconds as other people's holds lapse, so it keeps hunting until the window
+closes.
+
 ## Safety rails
 
 Booking is the one irreversible thing here, so it's fenced:
@@ -138,6 +248,8 @@ Booking is the one irreversible thing here, so it's fenced:
   can't book you five dinners.
 - `max_bookings` per target, persisted in SQLite, so a restart doesn't re-book.
 - One table per target per night, enforced against the same store.
+- `min_lead_minutes` — never book a table starting sooner than you could reach
+  it, and never one that has already been sat.
 - A `book`-action target with no payment method on file gets flagged by `doctor`,
   not discovered at 9am.
 
@@ -173,7 +285,7 @@ Book tables you intend to eat at, and cancel the ones you don't — `james cance
 exists for exactly that. Holding tables you won't use is how restaurants end up
 tightening the policies that make this necessary in the first place.
 
-## Development
+## Development and back-testing
 
 ```bash
 make dev     # editable install with test deps
@@ -181,11 +293,32 @@ make test    # pytest
 make lint    # ruff
 ```
 
-The logic worth trusting is isolated and directly tested: `matching.py` (which
-table wins) and `state.py` (booking caps and alert dedupe) are pure and covered,
-and `hunter.py`'s booking decisions are tested against a fake client so the
-"never double-book, never exceed budget, never book in dry-run" rules are
-assertions rather than hopes.
+79 tests. The pure logic — `matching.py` (which table wins) and `state.py`
+(booking caps, alert dedupe) — is directly unit tested.
+
+The interesting half is `tests/test_backtest.py`, which runs the **real**
+`Hunter` and the **real** `ResyClient` against `simulator.py`, a small stateful
+fake Resy that models what actually happens at a drop: inventory appearing at an
+instant, competitors taking tables out from under you, holds lapsing and tables
+bouncing back, sessions going stale, and rate limits. It runs over the real event
+loop with real timing, so what's under test is the code path that will run at
+9am — not a paraphrase of it.
+
+That harness earned its keep. Four bugs it caught, each now a regression test:
+
+- **`AuthError` was silently swallowed.** `AuthError` subclasses `ResyError`, and
+  three `except ResyError: continue` handlers caught it. An expired session
+  meant the bot polled forever, found nothing, booked nothing, and never said a
+  word — the worst possible failure for something you aren't watching.
+- **Past tables were bookable.** `slot_matches` checked time-of-day but not
+  whether the slot had already happened, so a poll at 8pm would try to book
+  tonight's 7pm table. Hence `min_lead_minutes`.
+- **Losing one race ended the whole snipe.** The burst stopped the instant it saw
+  inventory, even if every booking attempt lost. Tables bounce back within
+  seconds as competitors' holds lapse, and that window was being thrown away.
+- **A useless slot hid a good one.** `search` broke out of the party-size loop on
+  any returned slot, so an out-of-window 2-top stopped it from ever probing the
+  bookable 3-top behind it.
 
 ## Layout
 
@@ -198,6 +331,7 @@ src/jamesiv/
 ├── models.py      # Slot, Booking, error taxonomy
 ├── notify.py      # ntfy + pushover
 ├── resy.py        # API client, token bucket, connection reuse
+├── simulator.py   # stateful fake Resy, for back-testing and `james simulate`
 ├── state.py       # SQLite: bookings, dedupe, events
 └── timeutil.py    # NYC time, clock sync, precise sleep
 ```
