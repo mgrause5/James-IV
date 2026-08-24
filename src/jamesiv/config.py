@@ -100,26 +100,28 @@ class DropConfig(BaseModel):
     at: time = Field(default=time(9, 0, 0))
     days_ahead: int = Field(default=30, ge=1, le=365)
     # Start firing this many ms early to absorb network latency. The first
-    # request lands slightly before the boundary and returns nothing; the burst
-    # behind it lands right on top of the release.
+    # request lands slightly before the boundary and returns nothing; the ones
+    # behind it land right on top of the release.
     lead_ms: int = Field(default=250, ge=0, le=5000)
-    # How long to keep hammering after the drop before giving up.
-    burst_seconds: float = Field(default=20.0, gt=0, le=300)
-    # Parallel in-flight `find` requests during the burst.
-    burst_concurrency: int = Field(default=3, ge=1, le=10)
-    burst_interval_ms: int = Field(default=150, ge=50, le=5000)
-    # Inventory either lands within a few seconds of the release or it is not
-    # coming. Poll hard for this long, then decay to a slower cadence rather
-    # than sustaining 20 req/s for the whole burst window.
-    aggressive_seconds: float = Field(default=5.0, ge=0.5, le=60)
+    # The whole snipe is a handful of precisely timed shots, not a barrage.
+    # Clock sync is what wins the race; volume just gets accounts flagged.
+    # Defaults: one worker firing every 400ms, five requests total -- the last
+    # lands ~1.4s after the boundary, which covers a slightly-late release.
+    # If all five miss, the regular poll loop sweeps the same date again within
+    # a minute, so a capped burst is a delay, not a defeat.
+    burst_seconds: float = Field(default=10.0, gt=0, le=300)
+    burst_concurrency: int = Field(default=1, ge=1, le=10)
+    burst_interval_ms: int = Field(default=400, ge=50, le=5000)
+    # If a larger budget is configured, poll hard for this long then decay,
+    # rather than sustaining full cadence for the whole window.
+    aggressive_seconds: float = Field(default=3.0, ge=0.5, le=60)
     decay_factor: float = Field(default=5.0, ge=1.0, le=50)
-    # Hard ceiling on find requests per burst, across all workers. A 20-second
-    # burst at full tilt is ~400 requests, which is both useless (the room sold
-    # out in the first two seconds) and a good way to get flagged.
-    max_requests: int = Field(default=120, ge=10, le=2000)
-    # HEAD probes used to measure clock skew before firing. More probes is a
-    # tighter bound; the scheduler wakes 75s early so the default costs nothing.
-    clock_probes: int = Field(default=12, ge=2, le=40)
+    # Hard ceiling on find requests per burst, across all workers. This is the
+    # knob that decides how loud a drop is; everything else shapes timing.
+    max_requests: int = Field(default=5, ge=1, le=2000)
+    # HEAD probes used to measure clock skew before firing. These are cheap
+    # metadata requests a minute before the drop, not availability polling.
+    clock_probes: int = Field(default=8, ge=2, le=40)
 
     @field_validator("at", mode="before")
     @classmethod

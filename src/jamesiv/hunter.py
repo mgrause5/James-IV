@@ -491,18 +491,14 @@ class Hunter:
         result: list[Booking] = []
 
         seen_inventory = False
+        handled = False  # a terminal outcome was reported (booked / alerted / dry run)
 
         async def worker(worker_id: int) -> None:
-            nonlocal attempts, seen_inventory
+            nonlocal attempts, seen_inventory, handled
             await asyncio.sleep(worker_id * (drop.burst_interval_ms / 1000.0)
                                 / max(1, drop.burst_concurrency))
             while not stop.is_set() and now_utc() < deadline:
                 if attempts >= drop.max_requests:
-                    log.warning(
-                        "%s: burst request cap (%d) reached; standing down. The poll "
-                        "loop keeps watching for returns.",
-                        target.name, drop.max_requests,
-                    )
                     stop.set()
                     return
                 attempts += 1
@@ -531,6 +527,7 @@ class Hunter:
                             booking = await self.try_book(target, ranked)
                             if booking is not None:
                                 result.append(booking)
+                                handled = True
                                 stop.set()
                                 return
                             if self.config.settings.dry_run:
@@ -538,6 +535,7 @@ class Hunter:
                                 # because we were outraced. Stop, or the
                                 # rehearsal burns the full burst window and
                                 # logs an alarming stream of lost races.
+                                handled = True
                                 stop.set()
                                 return
                             # Lost the race on every candidate. Do NOT stop --
@@ -551,6 +549,7 @@ class Hunter:
                             )
                         else:
                             await self.alert_slots(target, ranked[:3])
+                            handled = True
                             stop.set()
                             return
                 except RateLimited as exc:
@@ -571,7 +570,7 @@ class Hunter:
 
         await asyncio.gather(*(worker(i) for i in range(drop.burst_concurrency)))
 
-        if not result and not stop.is_set():
+        if not result and not handled:
             if seen_inventory:
                 # We saw tables and lost every race. Config is fine; we were slow.
                 log.warning(
@@ -586,11 +585,13 @@ class Hunter:
                     priority=PRIORITY_HIGH,
                 )
             else:
+                window = (now_utc() - started).total_seconds()
                 log.warning(
-                    "%s: NO inventory appeared in %.0fs (%d attempts). Either it sold out "
-                    "before our first request, or drop.at / drop.days_ahead is wrong -- "
-                    "check the venue's booking policy on its Resy page.",
-                    target.name, drop.burst_seconds, attempts,
+                    "%s: no inventory appeared within the request budget (%d request(s) "
+                    "over %.1fs). Either it sold out before our first shot, the release "
+                    "ran late, or drop.at / drop.days_ahead is wrong -- `james policy` "
+                    "shows what the venue states. The poll loop keeps watching this date.",
+                    target.name, attempts, window,
                 )
                 self.store.log_event(
                     "snipe-miss", f"{day.isoformat()} after {attempts} attempts", target.name

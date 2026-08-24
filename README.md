@@ -248,16 +248,18 @@ path, and pre-resolves the venue id. When the burst fires, `find` requests bypas
 the rate limiter; the moment inventory appears it goes straight to
 `details` → `book` with no ranking round trip wasted.
 
-The burst is budgeted rather than open-ended. Inventory either lands within a few
-seconds of the release or it isn't coming, so the cadence runs hard for
-`aggressive_seconds` and then decays, with `max_requests` as a hard ceiling.
-Left ungoverned a 20-second burst is ~400 requests, which is simultaneously
-useless — the room sold out in the first two seconds — and an excellent way to
-get an account flagged.
+The burst is a budget, not a barrage: by default **one worker firing five
+precisely timed requests**, 400ms apart, the first slightly before the boundary
+and the last ~1.4s after it. Clock sync is what wins the race; volume only gets
+accounts flagged. If all five miss — the release ran late, or the room went in
+the first exchange — the regular poll loop sweeps the same date again within a
+minute, so a spent budget is a delay, not a defeat. `max_requests` is the one
+knob that decides how loud a drop is; raise it only knowing that every extra
+request is visible to Resy.
 
-Losing the first race is not the end of the burst. Tables bounce back within
-seconds as other people's holds lapse, so it keeps hunting until the window
-closes.
+Within the budget, losing a race doesn't end the burst: tables bounce back
+within seconds as other people's holds lapse, and remaining shots are spent on
+exactly that window.
 
 ## Safety rails
 

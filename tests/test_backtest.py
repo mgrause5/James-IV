@@ -163,6 +163,7 @@ async def test_snipes_inventory_the_moment_it_is_released(rig):
                 "burst_seconds": 6,
                 "burst_concurrency": 3,
                 "burst_interval_ms": 60,
+                "max_requests": 300,
                 "clock_probes": 3,
             },
         )
@@ -196,6 +197,7 @@ async def test_keeps_hunting_after_losing_the_first_races(rig):
                 "burst_seconds": 8,
                 "burst_concurrency": 2,
                 "burst_interval_ms": 80,
+                "max_requests": 300,
                 "clock_probes": 3,
             },
         )
@@ -224,6 +226,7 @@ async def test_a_drop_that_never_lands_fails_cleanly_and_says_why(rig):
                 "burst_seconds": 2,
                 "burst_concurrency": 2,
                 "burst_interval_ms": 100,
+                "max_requests": 10,
                 "clock_probes": 2,
             },
         )
@@ -458,6 +461,7 @@ async def test_dry_run_stops_the_burst_instead_of_faking_lost_races(rig):
                 "burst_seconds": 20,
                 "burst_concurrency": 2,
                 "burst_interval_ms": 100,
+                "max_requests": 300,
                 "clock_probes": 2,
             },
         )
@@ -601,3 +605,28 @@ async def test_one_flaky_500_among_working_days_does_not_raise(rig):
         booking = await hunter.poll_once(hunter.config.targets[0])
 
     assert booking is not None
+
+
+async def test_default_drop_profile_fires_at_most_five_requests(rig):
+    """The owner's explicit requirement: a drop is 1-5 precisely timed shots,
+    never a barrage. This pins the shipped defaults to that promise."""
+    sim = SimResy()   # nothing ever released: worst case, maximum temptation
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "clock_probes": 2,
+                # everything else: shipped defaults
+            },
+        )
+        assert target.drop.max_requests == 5
+        assert target.drop.burst_concurrency == 1
+        hunter, _ = await rig(target)
+        await hunter.login()
+        await hunter.snipe(target)
+
+    assert sim.find_calls <= 5, f"default profile fired {sim.find_calls} requests"
+    assert sim.book_calls == 0

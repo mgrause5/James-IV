@@ -69,15 +69,14 @@ targets:
                          # "up to 30 days in advance, starting at 10:00 AM EST")
       days_ahead: 30     # fallback: releases the date exactly this far out
       lead_ms: 250       # fire slightly early to absorb network latency
-      burst_seconds: 20
-      burst_concurrency: 3
-      burst_interval_ms: 150
-      # Poll hard for this long, then decay. Inventory either lands within a
-      # few seconds of the release or it is not coming, and sustaining 20
-      # requests/second for a full 20s window is how accounts get flagged.
-      aggressive_seconds: 5
-      decay_factor: 5
-      max_requests: 120  # hard ceiling on find requests per burst
+      # The snipe is a handful of precisely timed shots, not a barrage: one
+      # worker, one request every 400ms, five requests total. Clock sync wins
+      # the race; volume only gets accounts flagged. If all five miss, the
+      # poll loop sweeps the same date again within a minute.
+      burst_concurrency: 1
+      burst_interval_ms: 400
+      max_requests: 5
+      burst_seconds: 10  # outer time limit; the request cap ends it far sooner
 
     poll_interval_seconds: 60
     max_bookings: 1
