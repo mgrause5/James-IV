@@ -268,6 +268,15 @@ class Settings(BaseModel):
     max_bookings_per_run: int = Field(default=3, ge=1)
     request_rate: float = Field(default=4.0, gt=0, le=20)
     request_burst: int = Field(default=8, ge=1, le=40)
+    # Master switch for the cancellation-polling engine. Off means the bot
+    # contacts the providers ONLY around each venue's release time -- a few
+    # clock-sync probes, the capped burst, and (for auto targets) one policy
+    # re-read a day. Roughly a hundred requests per DAY across the whole
+    # roster, concentrated at the drop minutes: the quietest possible
+    # footprint. The cost: no cancellation catches, and no second chance
+    # between drops if a burst loses its race. Watcher-only targets (no
+    # drop block) sit idle while this is off.
+    poll_for_cancellations: bool = True
     state_path: str = "state/james.db"
     log_level: str = "INFO"
     # Re-login this often; Resy tokens are long-lived but not eternal.

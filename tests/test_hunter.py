@@ -190,3 +190,33 @@ class TestSearch:
     async def test_slots_outside_the_time_bounds_are_filtered_out(self, store):
         hunter, target, _, _ = build(store, slots=[make_slot("23:30")])
         assert await hunter.search(target, [date(2026, 9, 23)]) == []
+
+
+class TestEnginePlan:
+    """The drops-only posture: with polling off, the bot must plan ZERO poll
+    engines -- its only provider contact is around each release time."""
+
+    def _hunter(self, store, poll: bool):
+        sniper = Target(name="Sniper", slug="s", venue_id=1,
+                        drop={"at": "10:00", "days_ahead": 7})
+        watcher = Target(name="Watcher", slug="w", venue_id=2)
+        config = Config(
+            settings=Settings(poll_for_cancellations=poll),
+            targets=[sniper, watcher],
+        )
+        return Hunter(config=config, secrets=Secrets(), client=FakeClient(),
+                      store=store, notifier=FakeNotifier())
+
+    def test_polling_off_plans_only_snipes(self, store):
+        plan = self._hunter(store, poll=False).engine_plan()
+        assert all(kind == "snipe" for kind, _ in plan)
+        assert [t.name for _, t in plan] == ["Sniper"]
+
+    def test_watcher_only_target_is_idle_when_polling_is_off(self, store):
+        plan = self._hunter(store, poll=False).engine_plan()
+        assert "Watcher" not in {t.name for _, t in plan}
+
+    def test_polling_on_plans_both_engines(self, store):
+        plan = self._hunter(store, poll=True).engine_plan()
+        kinds = sorted(f"{k}:{t.name}" for k, t in plan)
+        assert kinds == ["poll:Sniper", "poll:Watcher", "snipe:Sniper"]

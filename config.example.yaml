@@ -19,6 +19,12 @@
 
 settings:
   dry_run: true            # flip to false after a few days of good picks
+  # Drops only: the bot contacts the booking platforms ONLY around each
+  # venue's release time (clock sync + a capped 5-shot burst) -- roughly a
+  # hundred requests per DAY across the whole roster, the quietest possible
+  # footprint. The trade: no cancellation catches between drops, and the
+  # watcher-only restaurants below sit idle. Set true to hunt cancellations.
+  poll_for_cancellations: false
   max_bookings_per_run: 2  # global ceiling per process run, across all targets
   # Aggregate request budget, shared by ALL Resy targets. A dozen restaurants
   # politely polling from one address still add up, and Resy's edge notices

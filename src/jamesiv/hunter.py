@@ -746,6 +746,21 @@ class Hunter:
 
     # ------------------------------------------------------------------- main
 
+    def engine_plan(self) -> list[tuple[str, Target]]:
+        """Which engines run for which targets under the current settings.
+
+        Kept separate from run() so the drops-only posture is testable: with
+        polling off, the plan must contain no poll engines at all, and a
+        watcher-only target simply has no engine.
+        """
+        plan: list[tuple[str, Target]] = []
+        for target in self.config.active_targets:
+            if self.config.settings.poll_for_cancellations:
+                plan.append(("poll", target))
+            if target.drop and target.drop.enabled:
+                plan.append(("snipe", target))
+        return plan
+
     async def run(self) -> None:
         """Start every engine for every active target and supervise them."""
         targets = self.config.active_targets
@@ -756,10 +771,22 @@ class Hunter:
         await self.login()
         self.store.prune()
 
+        plan = self.engine_plan()
+        engine_targets = {t.name for _, t in plan}
+        idle = [t.name for t in targets if t.name not in engine_targets]
+        if idle:
+            log.warning(
+                "Cancellation polling is OFF, so these watcher-only targets are "
+                "idle: %s", ", ".join(idle),
+            )
+
         tasks: list[asyncio.Task] = []
-        for target in targets:
-            tasks.append(asyncio.create_task(self.poll_loop(target), name=f"poll:{target.name}"))
-            if target.drop and target.drop.enabled:
+        for kind, target in plan:
+            if kind == "poll":
+                tasks.append(
+                    asyncio.create_task(self.poll_loop(target), name=f"poll:{target.name}")
+                )
+            else:
                 tasks.append(
                     asyncio.create_task(
                         self.snipe_scheduler(target), name=f"snipe:{target.name}"
@@ -768,9 +795,11 @@ class Hunter:
 
         tasks.append(asyncio.create_task(self._reauth_loop(), name="reauth"))
 
+        mode = "" if self.config.settings.poll_for_cancellations else " (drops only)"
         log.warning(
-            "James IV hunting %d target(s) with %d engine(s)%s",
-            len(targets), len(tasks) - 1, " [DRY RUN]" if self.config.settings.dry_run else "",
+            "James IV hunting %d target(s) with %d engine(s)%s%s",
+            len(targets), len(tasks) - 1, mode,
+            " [DRY RUN]" if self.config.settings.dry_run else "",
         )
 
         # A heartbeat on boot is the cheapest possible check that the whole
@@ -829,14 +858,19 @@ class Hunter:
         lines = []
         if self.config.settings.dry_run:
             lines.append("DRY RUN -- nothing will actually be booked.")
+        polling = self.config.settings.poll_for_cancellations
+        if not polling:
+            lines.append("Drops only -- cancellation polling is off.")
         now = now_nyc()
         for target in targets:
             if target.drop and target.drop.enabled:
                 next_drop = next_occurrence_nyc(target.drop.at, now)
                 when = humanize_delta((next_drop - now).total_seconds())
                 lines.append(f"{target.name}: {target.action}, next drop in {when}")
-            else:
+            elif polling:
                 lines.append(f"{target.name}: {target.action}, polling for cancellations")
+            else:
+                lines.append(f"{target.name}: idle (no drop; polling off)")
         return "\n".join(lines)
 
     async def _reauth_loop(self) -> None:
