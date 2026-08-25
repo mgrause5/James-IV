@@ -50,93 +50,49 @@ your terminal. All commands below get pasted into it.
 
 ## Part 4 — Get the bot onto the server (2 minutes)
 
-Paste this, then press Enter (all of it, it's one command):
+**If pasting into the web console doesn't work** (a known DigitalOcean
+annoyance): try right-click → Paste inside the black window, or
+Ctrl+Shift+V — and if the browser asks for clipboard permission, click
+Allow. If none of that works, use your own computer's terminal instead:
+open Terminal (Mac) or PowerShell (Windows), type
+`ssh root@YOUR_DROPLET_IP` (the IP is on your droplet's page), enter your
+droplet password — pasting works normally there. And the commands below are
+deliberately short enough to type by hand if all else fails.
+
+Type or paste, then press Enter after each line:
 
 ```bash
-git clone -b claude/nyc-resy-bot-7ft0ju https://github.com/mgrause5/James-IV.git && cd James-IV
+git clone https://github.com/mgrause5/James-IV.git
+cd James-IV
 ```
 
 **You should see:** a few lines ending without the word "error", and your
 prompt now says `James-IV`.
 
-*If it asks for a username/password:* your GitHub repository is private.
-Easiest fix — on github.com open the repo → Settings → scroll to Danger Zone →
-Change visibility → Public. There are no secrets in the code (your password
-never goes in it), so public is safe. Then re-paste the command.
-
-## Part 5 — Tell it who you are (5 minutes)
+## Part 5 — The installer does the rest (10 minutes)
 
 ```bash
-cp .env.example .env && cp config.example.yaml config.yaml
-nano .env
+bash setup.sh
 ```
 
-`nano` is a tiny text editor inside the terminal. Arrow keys move the cursor.
-Change these three lines to your real values:
+That one command replaces everything that used to be Parts 5–7: it asks for
+your Resy email and password (typing the password is invisible — that's
+normal), your ntfy topic (it offers to generate a random one — if you use
+it, subscribe to that exact name in the phone app), and your name and
+mobile number (DoorDash venues place the reservation under this name).
+Then it writes the settings file itself, builds the bot, runs the full
+health check, buzzes your phone, and asks whether to start.
 
-```
-RESY_EMAIL=you@example.com        ← your Resy login email
-RESY_PASSWORD=your-resy-password  ← your Resy password
-NTFY_TOPIC=james-iv-...           ← the topic name from Part 1
-```
-
-To save and exit nano: press **Ctrl+O**, then **Enter**, then **Ctrl+X**.
-
-Your password lives only in this file, only on this server. Don't put it
-anywhere else — not in the config file, not in a chat, not in an email.
+**You should see** green `ok` lines through the health check, then feel a
+buzz. If doctor prints red lines instead, read them — the fix is almost
+always a typo'd password (`rm .env`, then `bash setup.sh` again) or a
+missing saved card on resy.com. Safe to re-run as many times as needed.
 
 Also make sure the Resy account has a **saved credit card**
-(resy.com → your profile → Payment Methods). Hard venues won't book without one.
+(resy.com → your profile → Payment Methods). Hard venues won't book
+without one.
 
-## Part 6 — Choose your restaurants (10 minutes)
-
-```bash
-nano config.yaml
-```
-
-The file comes with three example restaurants showing the three patterns
-(a drop-snipe, a cancellation watcher, a notify-only). Edit names, dates, and
-times to taste — the comments explain every line. Two rules:
-
-- **Leave `dry_run: true` for now.** Dry run means the bot finds tables and
-  tells you what it *would* book, without spending a dollar. You'll switch it
-  off once you trust it.
-- The `slug` is the restaurant's name in its Resy web address:
-  `resy.com/cities/ny/torrisi` → slug is `torrisi`.
-
-Save and exit (Ctrl+O, Enter, Ctrl+X).
-
-## Part 7 — Health check (5 minutes)
-
-Build the bot (one-time, takes a couple of minutes):
-
-```bash
-mkdir -p state && chown 1000:1000 state
-docker compose build
-```
-
-Now the check-up:
-
-```bash
-docker compose run --rm james doctor
-```
-
-**You should see** green `ok` lines: your login works, your card was found,
-every restaurant was located, drop times match what each venue's page states,
-and — important — "availability search works from this network." If that last
-one is red, Resy is blocking your server's address; destroy the droplet and
-make a new one (new droplet = new address = usually fine).
-
-Then make your phone buzz:
-
-```bash
-docker compose run --rm james test-notify
-```
-
-**You should feel** a buzz. If not, the topic name in `.env` and in the ntfy
-app don't match exactly.
-
-## Part 8 — Dress rehearsal (2 minutes)
+## Part 6 — Dress rehearsal (optional) (2 minutes)
 
 ```bash
 docker compose run --rm james simulate Torrisi --scenario drop
@@ -147,7 +103,7 @@ real settings, and shows the bot catching it second by second. Try
 `--scenario contested` (competitors grab it first) and
 `--scenario cancellation` too. Nothing real is touched.
 
-## Part 9 — Let it off the leash
+## Part 7 — Let it off the leash (if you told the installer not to)
 
 ```bash
 docker compose up -d
@@ -163,7 +119,7 @@ docker compose logs -f
 
 (Ctrl+C stops *watching*; the bot itself keeps running.)
 
-## Part 10 — Graduation (over the next week)
+## Part 8 — Graduation (over the next week)
 
 1. **Days 1–3, dry run:** you'll get "[dry run] Would book:" alerts. Check
    them. Right restaurant? Right day? A time you'd actually eat at? If not,
