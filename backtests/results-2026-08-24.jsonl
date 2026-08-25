@@ -1,0 +1,11 @@
+{"name": "1-shot", "trials": 400, "take_rate": 0.005, "avg_requests": 1.0, "p50_time_to_book": 0.3311817669999755, "wall_s": 4.1}
+{"name": "3-tight", "trials": 400, "take_rate": 0.7075, "avg_requests": 2.4, "p50_time_to_book": 0.544697362000079, "wall_s": 7.4}
+{"name": "5-quick (shipped)", "trials": 400, "take_rate": 0.9225, "avg_requests": 2.6975, "p50_time_to_book": 0.8112795960000767, "wall_s": 20.0}
+{"name": "5-tight", "trials": 400, "take_rate": 0.7825, "avg_requests": 2.9475, "p50_time_to_book": 0.5548309499999959, "wall_s": 10.0}
+{"name": "5-spread", "trials": 400, "take_rate": 0.935, "avg_requests": 2.645, "p50_time_to_book": 0.6658201019999979, "wall_s": 70.4}
+{"name": "10-mixed", "trials": 400, "take_rate": 0.85, "avg_requests": 5.4875, "p50_time_to_book": 0.7984927299999072, "wall_s": 22.9}
+{"name": "25-volley", "trials": 400, "take_rate": 0.9075, "avg_requests": 10.66, "p50_time_to_book": 0.6597034650000069, "wall_s": 18.9}
+{"name": "100-barrage", "trials": 400, "take_rate": 0.9925, "avg_requests": 24.19, "p50_time_to_book": 0.6109068900000239, "wall_s": 25.2}
+{"name": "5-quick lead=0", "trials": 400, "take_rate": 0.9775, "avg_requests": 1.8675, "p50_time_to_book": 0.3302835619999769, "wall_s": 18.5}
+{"name": "5-quick lead=600", "trials": 400, "take_rate": 0.8675, "avg_requests": 3.2525, "p50_time_to_book": 1.2665337569999338, "wall_s": 19.7}
+{"name": "5-quick lead=1200", "trials": 400, "take_rate": 0.7625, "avg_requests": 4.2975, "p50_time_to_book": 1.7700682720000032, "wall_s": 19.5}

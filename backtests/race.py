@@ -32,21 +32,22 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from jamesiv.config import Config, Secrets, Settings, Target
 from jamesiv.hunter import Hunter
 from jamesiv.models import ResyError, Slot, SlotTaken
 from jamesiv.state import Store
-from jamesiv.timeutil import NYC, now_nyc
+from jamesiv.timeutil import NYC
 
 # ---------------------------------------------------------------- world model
 
 RTT_MEAN, RTT_SIGMA, RTT_FLOOR = 0.085, 0.015, 0.050
-CLOCK_ERR_SIGMA = 0.060
+CLOCK_ERR_SIGMA = float(os.environ.get("RACE_CLOCK_SIGMA", "0.060"))
 P_LATE_RELEASE, LATE_MIN, LATE_MAX = 0.30, 0.2, 2.0
 P_BOT_CONTESTED = 0.70
 BOT_MEDIAN, BOT_SIGMA = 0.45, 0.6          # lognormal, seconds after visibility
@@ -144,7 +145,9 @@ def _make_slots(rng: random.Random, lead_s: float) -> list[RaceSlot]:
     day = date.today() + timedelta(days=30)
     out = []
     for i in range(rng.randint(SLOTS_MIN, SLOTS_MAX)):
-        start = datetime(day.year, day.month, day.day, 18, 0, tzinfo=NYC) + timedelta(minutes=30 * i)
+        start = datetime(day.year, day.month, day.day, 18, 0, tzinfo=NYC) + timedelta(
+            minutes=30 * i
+        )
         slot = Slot(
             config_id=f"cfg-{i}", start=start, seating_type="Dining Room",
             venue_id=1, day=day, party_size=2,
@@ -208,6 +211,15 @@ STRATEGIES = [
      "aggressive_seconds": 2, "decay_factor": 5, "burst_seconds": 12},
     {"name": "100-barrage", "max_requests": 100, "burst_concurrency": 5, "burst_interval_ms": 60,
      "aggressive_seconds": 3, "decay_factor": 4, "burst_seconds": 12},
+    # the candidate new default: spread shape + minimal lead
+    {"name": "5-spread lead=100", "max_requests": 5, "burst_concurrency": 1,
+     "burst_interval_ms": 250, "aggressive_seconds": 0.6, "decay_factor": 12,
+     "burst_seconds": 9, "lead_ms": 100},
+    {"name": "5-spread lead=0", "max_requests": 5, "burst_concurrency": 1,
+     "burst_interval_ms": 250, "aggressive_seconds": 0.6, "decay_factor": 12,
+     "burst_seconds": 9, "lead_ms": 0},
+    {"name": "5-quick lead=100", "max_requests": 5, "burst_interval_ms": 400,
+     "lead_ms": 100, "burst_seconds": 10},
     # lead-time sensitivity, all on the shipped 5-quick shape
     {"name": "5-quick lead=0",    "max_requests": 5, "burst_interval_ms": 400, "lead_ms": 0,
      "burst_seconds": 10},

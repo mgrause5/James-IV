@@ -99,10 +99,12 @@ class DropConfig(BaseModel):
     auto: bool = False
     at: time = Field(default=time(9, 0, 0))
     days_ahead: int = Field(default=30, ge=1, le=365)
-    # Start firing this many ms early to absorb network latency. The first
-    # request lands slightly before the boundary and returns nothing; the ones
-    # behind it land right on top of the release.
-    lead_ms: int = Field(default=250, ge=0, le=5000)
+    # Start firing this many ms early. Race back-testing (backtests/RESULTS.md)
+    # showed every ms of lead costs: an early shot is a wasted shot, while a
+    # slightly-late first shot barely matters because the next follows 400ms
+    # behind. 100ms was the robust optimum across good and poor clock sync --
+    # near-best in both regimes. Set 0 only if you trust the sync completely.
+    lead_ms: int = Field(default=100, ge=0, le=5000)
     # The whole snipe is a handful of precisely timed shots, not a barrage.
     # Clock sync is what wins the race; volume just gets accounts flagged.
     # Defaults: one worker firing every 400ms, five requests total -- the last

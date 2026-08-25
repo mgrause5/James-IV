@@ -68,7 +68,7 @@ targets:
       at: "10:00:00"     # fallback (verified vs the live venue page, Aug 2026:
                          # "up to 30 days in advance, starting at 10:00 AM EST")
       days_ahead: 30     # fallback: releases the date exactly this far out
-      lead_ms: 250       # fire slightly early to absorb network latency
+      lead_ms: 100       # fire slightly early; back-tested optimum (RESULTS.md)
       # The snipe is a handful of precisely timed shots, not a barrage: one
       # worker, one request every 400ms, five requests total. Clock sync wins
       # the race; volume only gets accounts flagged. If all five miss, the
