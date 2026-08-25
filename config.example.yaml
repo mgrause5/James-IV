@@ -1,132 +1,229 @@
-# James IV -- target configuration.
-# Copy to config.yaml and edit. Credentials live in .env, not here.
+# James IV -- Michael's hunting list.
+# `james init` copies this to config.yaml; edit that copy on the server.
+#
+# THE FULL LIST (kept here so nothing is forgotten -- add/remove freely):
+#   On Resy, hunted below:  Carbone, Torrisi, 4 Charles, Tatiana, Cote,
+#                           Raoul's, I Sodi, Via Carota, Minetta Tavern,
+#                           Balthazar, Borgo, Lucali
+#   Not found on Resy (searched Aug 2026 under every name variant):
+#     - The Eighty Six .. no Resy NYC listing; if you have its Resy page URL,
+#                         the slug in that URL is all that's needed to add it
+#
+# Every venue id, slug, and drop time below was verified against the live
+# Resy API on 2026-08-25. Drop targets use `auto: true`, so the bot re-reads
+# each venue's stated policy daily and corrects itself if a venue changes.
+#
+# DEFAULTS CHOSEN (adjust to taste):
+#   party of 2 · any night · 17:30-21:30, preferring 19:00-20:30
+#   The five hardest rooms auto-BOOK; the rest NOTIFY your phone.
+#   dry_run is ON: nothing books until you flip it to false.
 
 settings:
-  # Find and rank, but never actually book. Start here for a day or two so you
-  # can see what the bot would have done before you let it use your card.
-  dry_run: true
-
-  # Hard ceiling on bookings per process run, across all targets. Cheap
-  # insurance against a config mistake booking you five dinners.
-  max_bookings_per_run: 2
-
-  # Requests per second against Resy, and burst allowance. The defaults are
-  # deliberately polite. Raising them does not make you faster at a drop
-  # (the burst path bypasses the bucket anyway) -- it just makes you noisier
-  # the other 23 hours of the day, which is how accounts get flagged.
+  dry_run: true            # flip to false after a few days of good picks
+  max_bookings_per_run: 2  # global ceiling per process run, across all targets
   request_rate: 4.0
   request_burst: 8
-
   state_path: state/james.db
   log_level: INFO
   reauth_interval_hours: 12
-
-  # Alert even when we found a table and lost the race to book it. Useful while
-  # tuning, noisy once you trust it.
   notify_on_miss: false
 
 targets:
-  # ---------------------------------------------------------------------
-  # A drop-time snipe -- the pattern for rooms that sell out the instant
-  # inventory is released.
-  #
-  # `drop.at` and `drop.days_ahead` are the two settings that decide whether
-  # this works at all. They are on the venue's Resy page, in the booking
-  # policy notes ("Reservations open 30 days in advance at 9AM"). Do not
-  # guess them: run `james window torrisi` to see the current booking
-  # horizon, and `james simulate Torrisi` to rehearse the whole thing.
-  # ---------------------------------------------------------------------
-  - name: Torrisi
-    slug: torrisi
+  # ------------------------------------------------------------- auto-book
+  - name: Carbone
+    slug: carbone
+    venue_id: 6194
     party_size: 2
     action: book
-
-    # Friday tables, 30 days out. The range is wider than days_ahead so the
-    # poll engine also catches cancellations either side of the drop.
     days_ahead_min: 25
-    days_ahead_max: 35
-    weekdays: [fri]
-
-    earliest: "18:00"
+    days_ahead_max: 31
+    earliest: "17:30"
     latest: "21:30"
     preferred_windows:
-      - { start: "19:00", end: "20:30" }   # first choice
-      - { start: "18:00", end: "19:00" }   # will accept
-      - { start: "20:30", end: "21:30" }   # will accept
-
-    seating_types: ["Dining Room", "Bar"]  # ranked; empty means anything
-    exclude_seating: ["Counter"]
-
+      - { start: "19:00", end: "20:30" }
+      - { start: "18:00", end: "19:00" }
     drop:
-      enabled: true
-      # Read the release time and day count off the venue's own Resy page at
-      # startup, and re-check daily. The values below become fallbacks for
-      # anything the page does not state. `james policy torrisi` shows exactly
-      # what would be discovered; `james doctor` cross-checks it against this
-      # file either way.
       auto: true
-      at: "10:00:00"     # fallback (verified vs the live venue page, Aug 2026:
-                         # "up to 30 days in advance, starting at 10:00 AM EST")
-      days_ahead: 30     # fallback: releases the date exactly this far out
-      lead_ms: 100       # fire slightly early; back-tested optimum (RESULTS.md)
-      # The snipe is a handful of precisely timed shots, not a barrage: one
-      # worker, one request every 400ms, five requests total. Clock sync wins
-      # the race; volume only gets accounts flagged. If all five miss, the
-      # poll loop sweeps the same date again within a minute.
-      burst_concurrency: 1
-      burst_interval_ms: 400
-      max_requests: 5
-      burst_seconds: 10  # outer time limit; the request cap ends it far sooner
-
-    poll_interval_seconds: 60
+      at: "10:00:00"    # verified: "up to 30 days in advance ... 10:00 AM"
+      days_ahead: 30
     max_bookings: 1
     priority: 10
 
-  # ---------------------------------------------------------------------
-  # A cancellation hunter. No drop block -- it just watches a date range
-  # patiently and pounces when somebody cancels. This is where most tables
-  # actually come from.
-  # ---------------------------------------------------------------------
-  - name: 4 Charles Prime Rib
-    slug: 4-charles-prime-rib
+  - name: Torrisi
+    slug: torrisi
+    venue_id: 64593
     party_size: 2
-    party_size_fallback: [3]
     action: book
-
-    days_ahead_min: 0
-    days_ahead_max: 30
-    weekdays: [wed, thu, fri, sat]
-
-    earliest: "18:00"
-    latest: "21:00"
+    days_ahead_min: 25
+    days_ahead_max: 31
+    earliest: "17:30"
+    latest: "21:30"
     preferred_windows:
       - { start: "19:00", end: "20:30" }
-
-    # Ignore anything starting sooner than this. Same-day cancellation hunting
-    # otherwise surfaces tables you cannot physically get to -- and Resy will
-    # happily return tonight's 7pm slot to a query you make at 8pm.
-    min_lead_minutes: 120
-
-    poll_interval_seconds: 45
-    poll_jitter: 0.35
+      - { start: "18:00", end: "19:00" }
+    drop:
+      auto: true
+      at: "10:00:00"    # verified: "up to 30 days in advance, starting at 10:00 AM EST"
+      days_ahead: 30
     max_bookings: 1
-    priority: 5
-    notes: "Notoriously hard. Cancellations trickle out all day."
+    priority: 10
 
-  # ---------------------------------------------------------------------
-  # Notify-only: a place you would like to know about but do not want the
-  # bot committing your card to.
-  # ---------------------------------------------------------------------
-  - name: Semma
-    slug: semma
+  - name: 4 Charles Prime Rib
+    slug: 4-charles-prime-rib
+    venue_id: 834
+    party_size: 2
+    action: book
+    days_ahead_min: 18
+    days_ahead_max: 22
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    drop:
+      auto: true
+      at: "09:00:00"    # verified: "up to 21 days in advance" at 9:00 AM
+      days_ahead: 21    # NOTE: 21 days and 9am -- different from the others
+    max_bookings: 1
+    priority: 9
+
+  - name: Tatiana
+    slug: tatiana
+    venue_id: 65452
+    party_size: 2
+    action: book
+    days_ahead_min: 24
+    days_ahead_max: 29
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    drop:
+      auto: true
+      at: "12:00:00"    # verified: "28 days in advance at 12:00pm EST" -- NOON
+      days_ahead: 28
+    max_bookings: 1
+    priority: 9
+
+  - name: Cote
+    slug: cote-nyc
+    venue_id: 72271
+    party_size: 2
+    action: book
+    days_ahead_min: 25
+    days_ahead_max: 31
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    drop:
+      auto: true
+      at: "10:00:00"    # verified: parties up to 6 open 30 days ahead, 10:00 AM
+      days_ahead: 30
+    max_bookings: 1
+    priority: 8
+
+  - name: Raoul's
+    slug: raoulsrestaurant
+    venue_id: 7241
+    party_size: 2
+    action: book
+    days_ahead_min: 25
+    days_ahead_max: 31
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    drop:
+      auto: true
+      # Page verified: "up to 30 days in advance, exclusively through Resy" --
+      # but it does not state a release TIME. 10:00 is the common NYC pattern;
+      # `auto` corrects this the moment their page states one. Watch the first
+      # drop's log to confirm.
+      at: "10:00:00"
+      days_ahead: 30
+    max_bookings: 1
+    priority: 8
+
+  # ---------------------------------------------------- notify-only, polled
+  # These watch for cancellations across the next month and buzz your phone
+  # with a deep link. Change `action: notify` to `book` on any you want the
+  # bot to grab on its own.
+  - name: I Sodi
+    slug: i-sodi
+    venue_id: 443
     party_size: 2
     action: notify
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
+    poll_interval_seconds: 60
+    priority: 5
+    notes: "No stated release policy; cancellation hunting only."
 
-    dates:
-      - 2026-09-12
-      - 2026-09-13
+  - name: Via Carota
+    slug: via-carota
+    venue_id: 2567
+    party_size: 2
+    action: notify
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
+    poll_interval_seconds: 60
+    priority: 4
+    notes: "Mostly walk-in; a limited number of reservations, 30 days out at 10am.
+      Add a drop block if you want those sniped."
 
-    earliest: "17:00"
-    latest: "22:00"
+  - name: Minetta Tavern
+    slug: minetta-tavern
+    venue_id: 9846
+    party_size: 2
+    action: notify
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
+    poll_interval_seconds: 60
+    priority: 4
+    notes: "No stated release policy; cancellation hunting only."
+
+  - name: Balthazar
+    slug: balthazar-nyc
+    venue_id: 50227
+    party_size: 2
+    action: notify
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
     poll_interval_seconds: 90
-    priority: 1
+    priority: 3
+    notes: "No stated release policy; big room, tables usually findable."
+
+  - name: Lucali
+    slug: lucali-ny
+    venue_id: 54876
+    party_size: 2
+    action: notify
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:00"
+    latest: "21:30"
+    poll_interval_seconds: 90
+    priority: 3
+    notes: "Historically walk-in only; a Resy listing exists. If it never shows
+      inventory, that is their policy, not a bot problem."
+
+  - name: Borgo
+    slug: borgo
+    venue_id: 84290
+    party_size: 2
+    action: notify
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
+    poll_interval_seconds: 60
+    priority: 4
+    notes: "No stated release policy; cancellation hunting only."

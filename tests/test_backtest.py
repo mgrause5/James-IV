@@ -670,7 +670,7 @@ async def test_an_imminent_drop_is_sniped_not_skipped_to_tomorrow(rig):
             weekdays=[],
             drop={
                 "days_ahead": 30,
-                "at": (now_nyc() + timedelta(seconds=4)).strftime("%H:%M:%S"),
+                "at": "00:00:00",   # placeholder; stamped for real below
                 "lead_ms": 200,
                 "burst_interval_ms": 400,
                 "clock_probes": 2,
@@ -678,8 +678,12 @@ async def test_an_imminent_drop_is_sniped_not_skipped_to_tomorrow(rig):
         )
         hunter, _ = await rig(target)
         await hunter.login()
-        # Release aligned with drop.at; shots at ~3.8s, 4.2s... the second one
-        # lands after the release with margin to spare.
+        # Stamp the drop time and the release clock at the SAME instant --
+        # login on a cold interpreter can take seconds, and stamping the drop
+        # at build time made the release land after every shot.
+        target.drop = target.drop.model_copy(
+            update={"at": (now_nyc() + timedelta(seconds=4)).time()}
+        )
         sim.release_in(4.0, slot_at(30, "19:00"))
 
         task = asyncio.create_task(hunter.snipe_scheduler(target))

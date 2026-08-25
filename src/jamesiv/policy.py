@@ -57,6 +57,16 @@ _MONTHLY_RE = re.compile(
 _RELEVANT_RE = re.compile(
     r"reservation|book|table|release|open|available|drop", re.IGNORECASE
 )
+# Sentences about reminders, cancellation policies, and deposits also contain
+# "N days" phrases -- "a courtesy reminder text 2 days prior to your
+# reservation" is not a release policy, and treating it as one would arm a
+# snipe for a nonsense window. Such sentences are excluded before parsing.
+_DISQUALIFY_RE = re.compile(
+    r"reminder|no[- ]show|cancel|charge|deposit|credit card|grace period|"
+    r"running late|confirm|prior to your reservation|before your reservation",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +105,16 @@ def _count(token: str) -> int | None:
 
 def parse_policy_text(text: str) -> DropPolicy | None:
     """Pull a release policy out of one blob of prose. None if nothing found."""
+    if not text or not _RELEVANT_RE.search(text):
+        return None
+
+    # Drop reminder/cancellation/deposit sentences before parsing, keeping the
+    # rest joined so a policy split across two sentences still merges.
+    kept = [
+        sent for sent in _SENTENCE_SPLIT_RE.split(text)
+        if not _DISQUALIFY_RE.search(sent)
+    ]
+    text = " ".join(kept)
     if not text or not _RELEVANT_RE.search(text):
         return None
 

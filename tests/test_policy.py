@@ -145,3 +145,30 @@ class TestDescribe:
     def test_reads_like_a_sentence(self):
         policy = DropPolicy(30, dtime(9, 0), "daily", "text", "")
         assert policy.describe() == "30 days ahead, at 09:00 ET"
+
+
+class TestDisqualifiedSentences:
+    """REGRESSION: Minetta Tavern's live page -- 'a courtesy reminder text 2
+    days prior to your reservation' -- parsed as a 2-days-ahead release
+    policy. Reminder/cancellation/deposit prose must never arm a snipe."""
+
+    def test_a_reminder_sentence_is_not_a_release_policy(self):
+        text = "You will receive a courtesy reminder text 2 days prior to your reservation."
+        assert parse_policy_text(text) is None
+
+    def test_cancellation_terms_are_not_a_release_policy(self):
+        text = (
+            "Please cancel at least 3 days in advance to avoid a charge. "
+            "A deposit of $50 per guest is required."
+        )
+        assert parse_policy_text(text) is None
+
+    def test_the_real_policy_survives_next_to_a_reminder(self):
+        text = (
+            "Reservations are available up to 21 days in advance at 9:00 AM. "
+            "You will receive a courtesy reminder text 2 days prior to your reservation."
+        )
+        policy = parse_policy_text(text)
+        assert policy is not None
+        assert policy.days_ahead == 21
+        assert policy.at == dtime(9, 0)
