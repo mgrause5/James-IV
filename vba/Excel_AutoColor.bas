@@ -212,9 +212,9 @@ Private Function HasExternalRef(ByVal f As String, ByVal ws As Worksheet) As Boo
 
         If pre Like "[A-Za-z0-9_]" Or inner Like "[@#[]*" Then
             ' structured reference - skip it entirely
-        ElseIf EndsWithWorkbookExt(inner) Then
-            ' a genuine bracketed file part always names a workbook
-            ' file; a mere dot could be a bare column ref ([Q2.Rev])
+        ElseIf EndsWithWorkbookExt(inner) Or EndsWithImportExt(inner) Then
+            ' a genuine bracketed file part names a file Excel can
+            ' open; a mere dot could be a bare column ref ([Q2.Rev])
             If BangFollowsSheetName(f, closeB + 1) Then
                 HasExternalRef = True
                 Exit Function
@@ -247,7 +247,7 @@ Private Function HasExternalRef(ByVal f As String, ByVal ws As Worksheet) As Boo
                     End If
                 Loop
                 If j >= 1 Then
-                    tok = Mid$(f, j + 1, p - j - 2)
+                    tok = Replace(Mid$(f, j + 1, p - j - 2), "''", "'")
                     If InStr(tok, ":") > 0 Or InStr(tok, "\") > 0 Or _
                        InStr(tok, "/") > 0 Or InStr(tok, "[") > 0 Then
                         HasExternalRef = True
@@ -303,9 +303,11 @@ Private Function MatchingBracket(ByVal f As String, ByVal openPos As Long) As Lo
     Next i
 End Function
 
-' True when, starting at startPos, the formula reads like a sheet name
-' (optionally closed by ') and then a "!". Any operator, comma, or
-' parenthesis on the way disqualifies the candidate.
+' True when, starting at startPos, the formula reads like an UNQUOTED
+' sheet name and then a "!". A sheet name containing a space, hyphen,
+' or other punctuation is always quoted in formulas - and the quoted
+' bracketed form is caught by pass 2's "[" test instead - so anything
+' outside the identifier characters disqualifies the candidate here.
 Private Function BangFollowsSheetName(ByVal f As String, ByVal startPos As Long) As Boolean
     Dim i As Long, c As String
     For i = startPos To Len(f)
@@ -313,10 +315,7 @@ Private Function BangFollowsSheetName(ByVal f As String, ByVal startPos As Long)
         If c = "!" Then
             BangFollowsSheetName = True
             Exit Function
-        ElseIf c = "'" Then
-            BangFollowsSheetName = (Mid$(f, i + 1, 1) = "!")
-            Exit Function
-        ElseIf c Like "[A-Za-z0-9_. -]" Then
+        ElseIf c Like "[A-Za-z0-9_.]" Then
             ' still inside a plausible sheet name - keep scanning
         ElseIf AscW(c) > 127 Or AscW(c) < 0 Then
             ' non-ASCII letters are legal in sheet names - keep scanning
@@ -331,6 +330,17 @@ Private Function EndsWithWorkbookExt(ByVal tok As String) As Boolean
     EndsWithWorkbookExt = tok Like "*.xls" Or tok Like "*.xls?" _
         Or tok Like "*.xlt" Or tok Like "*.xlt?" Or tok Like "*.xla" _
         Or tok Like "*.xlam" Or tok Like "*.csv" Or tok Like "*.ods"
+End Function
+
+' Non-workbook files Excel can still open as workbooks and link to
+' ([export.txt]export!$A$1). Only pass 1 consults this list: in a
+' bracket it must be a file, while a bare token ending in .txt or
+' .xml is far more likely a sheet named after an import.
+Private Function EndsWithImportExt(ByVal tok As String) As Boolean
+    tok = LCase$(tok)
+    EndsWithImportExt = tok Like "*.txt" Or tok Like "*.prn" _
+        Or tok Like "*.dbf" Or tok Like "*.xml" Or tok Like "*.slk" _
+        Or tok Like "*.dif" Or tok Like "*.htm" Or tok Like "*.html"
 End Function
 
 ' Any "!" that survives after references to the cell's own sheet are
