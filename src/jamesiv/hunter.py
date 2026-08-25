@@ -385,6 +385,10 @@ class Hunter:
     async def poll_loop(self, target: Target) -> None:
         """Poll a target forever, with jitter, until it is satisfied."""
         log.info("Polling %s every ~%.0fs", target.name, target.poll_interval_seconds)
+        # Staggered start: a dozen targets kicking off together would fire a
+        # synchronized volley at the provider every interval -- from one IP,
+        # that pattern reads as exactly what it is. Spread them out.
+        await asyncio.sleep(random.uniform(0, min(target.poll_interval_seconds, 120.0)))
         while True:
             if self.store.booking_count(target.name) >= target.max_bookings:
                 log.info("%s satisfied (%d booking(s)); stopping poll", target.name,
@@ -407,7 +411,7 @@ class Hunter:
             except Exception as exc:
                 log.exception("Poll failed for %s: %s", target.name, exc)
             else:
-                self._clear_blind_poll(target)
+                await self._clear_blind_poll(target)
 
             base = target.poll_interval_seconds
             jitter = base * target.poll_jitter
@@ -807,11 +811,19 @@ class Hunter:
             )
             self.store.log_event("blind", str(exc), target.name)
 
-    def _clear_blind_poll(self, target: Target) -> None:
+    async def _clear_blind_poll(self, target: Target) -> None:
         count = self._blind_polls.pop(target.name, 0)
         if count >= self.config.settings.blind_poll_alert_after:
             log.warning("%s: availability searches recovered after %d blind polls",
                         target.name, count)
+            # The blindness alert promised "it will tell you when sight
+            # returns" -- keep that promise on the phone, not just in a log.
+            await self.notifier.send(
+                f"Sight restored: {target.name}",
+                f"Availability searches are working again after {count} failed polls.",
+                priority=PRIORITY_LOW,
+                tags=["eyes"],
+            )
 
     def _startup_summary(self, targets: list[Target]) -> str:
         lines = []

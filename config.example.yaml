@@ -20,8 +20,13 @@
 settings:
   dry_run: true            # flip to false after a few days of good picks
   max_bookings_per_run: 2  # global ceiling per process run, across all targets
-  request_rate: 4.0
-  request_burst: 8
+  # Aggregate request budget, shared by ALL Resy targets. A dozen restaurants
+  # politely polling from one address still add up, and Resy's edge notices
+  # sustained volume (observed live: it answers with empty 500s until you
+  # cool off). Raising this does not make drops faster -- the burst path
+  # bypasses this bucket -- it only makes the quiet hours louder.
+  request_rate: 1.0
+  request_burst: 4
   state_path: state/james.db
   log_level: INFO
   reauth_interval_hours: 12
@@ -156,7 +161,7 @@ targets:
     days_ahead_max: 30
     earliest: "17:30"
     latest: "21:30"
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     priority: 5
     notes: "No stated release policy; cancellation hunting only."
 
@@ -169,7 +174,7 @@ targets:
     days_ahead_max: 30
     earliest: "17:30"
     latest: "21:30"
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     priority: 4
     notes: "Mostly walk-in; a limited number of reservations, 30 days out at 10am.
       Add a drop block if you want those sniped."
@@ -183,7 +188,7 @@ targets:
     days_ahead_max: 30
     earliest: "17:30"
     latest: "21:30"
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     priority: 4
     notes: "No stated release policy; cancellation hunting only."
 
@@ -196,7 +201,7 @@ targets:
     days_ahead_max: 30
     earliest: "17:30"
     latest: "21:30"
-    poll_interval_seconds: 90
+    poll_interval_seconds: 300
     priority: 3
     notes: "No stated release policy; big room, tables usually findable."
 
@@ -209,7 +214,7 @@ targets:
     days_ahead_max: 30
     earliest: "17:00"
     latest: "21:30"
-    poll_interval_seconds: 90
+    poll_interval_seconds: 300
     priority: 3
     notes: "Historically walk-in only; a Resy listing exists. If it never shows
       inventory, that is their policy, not a bot problem."
@@ -244,7 +249,7 @@ targets:
     drop:
       at: "10:00:00"     # sourced from 2026 guides + sister venue; verify
       days_ahead: 14     # from the first drop's log (see note above)
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     max_bookings: 1
     priority: 8
 
@@ -266,7 +271,7 @@ targets:
     drop:
       at: "09:00:00"     # sourced from 2026 guides; verify from first drop log
       days_ahead: 14
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     max_bookings: 1
     priority: 8
 
@@ -290,7 +295,7 @@ targets:
     drop:
       at: "10:00:00"       # stated on oresh.com; discovery is Resy-only so
       days_ahead: 7        # this is set by hand -- confirm from the first log
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     max_bookings: 1
     priority: 9
 
@@ -303,6 +308,6 @@ targets:
     days_ahead_max: 30
     earliest: "17:30"
     latest: "21:30"
-    poll_interval_seconds: 60
+    poll_interval_seconds: 240
     priority: 4
     notes: "No stated release policy; cancellation hunting only."
