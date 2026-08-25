@@ -239,8 +239,11 @@ async def test_a_drop_that_never_lands_fails_cleanly_and_says_why(rig):
     assert sim.booked == []
     assert sim.find_calls > 0
     # Nothing was ever seen, so this is a config problem, not a lost race --
-    # and the bot must not claim it was outraced.
+    # the bot must not claim it was outraced, but it MUST still report the
+    # empty drop to the owner's phone: mystery silence at a drop is a bug.
     assert "Missed the drop" not in notifier.titles()
+    assert any("Drop report" in t for t, _ in notifier.sent)
+    assert any("sold out before" in m or "days_ahead" in m for _, m in notifier.sent)
 
 
 # ---------------------------------------------------------------------------
@@ -739,3 +742,28 @@ async def test_a_wide_range_is_swept_in_rotating_chunks_not_all_at_once(rig):
                 break
 
     assert notifier.sent, "rotation never reached the far end of the range"
+
+
+async def test_a_throttled_drop_reports_rejection_not_emptiness(rig):
+    """If every burst shot is rejected by the edge, the report must say THAT --
+    'nothing was released' and 'we were blind' demand different fixes."""
+    sim = SimResy()
+    sim.find_status_override = 500
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_interval_ms": 100,
+                "clock_probes": 2,
+            },
+        )
+        hunter, notifier = await rig(target)
+        await hunter.login()
+        await hunter.snipe(target)
+
+    reports = [m for t, m in notifier.sent if "Drop report" in t]
+    assert reports, "a fully rejected drop must still reach the phone"
+    assert "REJECTED" in reports[0] and "throttled" in reports[0]

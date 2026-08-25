@@ -22,7 +22,14 @@ from datetime import date, datetime, timedelta
 from .config import Config, Secrets, Target
 from .matching import best_slots, candidate_days, drop_target_day, slot_matches
 from .models import AuthError, Booking, RateLimited, ResyError, Slot, SlotTaken
-from .notify import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_URGENT, Notifier, resy_url
+from .notify import (
+    PRIORITY_DEFAULT,
+    PRIORITY_HIGH,
+    PRIORITY_LOW,
+    PRIORITY_URGENT,
+    Notifier,
+    resy_url,
+)
 from .policy import DropPolicy, extract_policy
 from .resy import ResyClient
 from .sevenrooms import deep_link as sevenrooms_deep_link
@@ -574,9 +581,10 @@ class Hunter:
 
         seen_inventory = False
         handled = False  # a terminal outcome was reported (booked / alerted / dry run)
+        request_errors = 0
 
         async def worker(worker_id: int) -> None:
-            nonlocal attempts, seen_inventory, handled
+            nonlocal attempts, seen_inventory, handled, request_errors
             await asyncio.sleep(worker_id * (drop.burst_interval_ms / 1000.0)
                                 / max(1, drop.burst_concurrency))
             while not stop.is_set() and now_utc() < deadline:
@@ -647,7 +655,7 @@ class Hunter:
                     stop.set()
                     raise
                 except ResyError:
-                    pass
+                    request_errors += 1
 
                 # Decay the cadence once the release window has passed.
                 elapsed = (now_utc() - started).total_seconds()
@@ -673,16 +681,34 @@ class Hunter:
                     priority=PRIORITY_HIGH,
                 )
             else:
+                # An empty drop must never be mystery silence on the owner's
+                # phone: say what happened and what it most likely means.
                 window = (now_utc() - started).total_seconds()
-                log.warning(
-                    "%s: no inventory appeared within the request budget (%d request(s) "
-                    "over %.1fs). Either it sold out before our first shot, the release "
-                    "ran late, or drop.at / drop.days_ahead is wrong -- `james policy` "
-                    "shows what the venue states. The poll loop keeps watching this date.",
-                    target.name, attempts, window,
-                )
+                if attempts > 0 and request_errors >= attempts:
+                    diagnosis = (
+                        f"every one of the {attempts} requests was REJECTED by the "
+                        "provider -- this server was being throttled at drop time, "
+                        "so the drop happened without us. If this repeats, rebuild "
+                        "the droplet for a fresh address."
+                    )
+                elif attempts == 0:
+                    diagnosis = "the burst never got a request off -- check the logs."
+                else:
+                    diagnosis = (
+                        f"no matching table appeared in {attempts} request(s) over "
+                        f"{window:.0f}s. Either nothing for this party size/time window "
+                        "was released, it sold out before the first shot, or "
+                        "drop.at / days_ahead is off by a little."
+                    )
+                log.warning("%s: drop came up empty -- %s", target.name, diagnosis)
                 self.store.log_event(
-                    "snipe-miss", f"{day.isoformat()} after {attempts} attempts", target.name
+                    "snipe-miss", f"{day.isoformat()}: {diagnosis}", target.name
+                )
+                await self.notifier.send(
+                    f"Drop report: {target.name}",
+                    f"{day:%a %b %-d} -- nothing booked. {diagnosis}",
+                    priority=PRIORITY_DEFAULT,
+                    tags=["hourglass"],
                 )
         return result[0] if result else None
 
