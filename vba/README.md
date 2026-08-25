@@ -64,9 +64,18 @@ Convention (standard modeling colors, changeable in the CONFIG block):
 | Green | Formula referencing another sheet in the workbook |
 | Red | Formula linking to a different workbook |
 
-Text labels are left untouched by default (`COLOR_TEXT_CONSTANTS = False`).
-String literals inside formulas (`="Total!"`) don't fool the detection, and
-`=Sheet1!A1` written *on* Sheet1 stays black.
+Details worth knowing:
+
+- Text labels are left untouched by default (`COLOR_TEXT_CONSTANTS = False`).
+- Re-running is safe: a stale blue/green/red left over from a previous run is
+  reset when the cell's content changed category, while your own label/header
+  styling is never touched (only the three convention colors get reset).
+- The detection is careful about the tricky cases: string literals
+  (`="Total!"`), structured table references (`=[@[Adj. EBITDA]]/Drivers!C5`
+  stays green, not red), same-sheet refs (`=Sheet1!A1` on Sheet1 stays black),
+  sheet names that are suffixes of each other (`Model` vs `DCF_Model`), and
+  bracket-free external links (`=Assumptions.xlsx!WACC`,
+  `='C:\Deals\Assumptions.xlsx'!WACC`) all classify correctly.
 
 ### PPT_ShapeTools
 
@@ -76,7 +85,9 @@ String literals inside formulas (`="Total!"`) don't fool the detection, and
    `CONFIRM_GRAB = True` in the CONFIG block for a popup).
 2. Select any other shape(s) → run **`ApplyWidth`**, **`ApplyHeight`**, or
    **`ApplySize`** for both. Aspect-ratio lock is handled automatically, and
-   the grabbed size survives until you close PowerPoint.
+   "resize shape to fit text" (autofit) is turned off on the targets so the
+   applied size actually sticks. The grabbed size survives until you close
+   PowerPoint.
 
 **Swap** — select exactly two shapes:
 
@@ -93,18 +104,31 @@ String literals inside formulas (`="Total!"`) don't fool the detection, and
   when nothing is selected). Repeated markers cascade slightly so they never
   hide behind each other. Text, font, size and colors are in the CONFIG block.
 - **`RemoveTBUMarkersOnSlide`** / **`RemoveTBUMarkersInDeck`** — markers are
-  tagged internally, so cleanup removes exactly the ones this macro created
-  and never touches a normal text box that happens to say "TBU".
+  tagged internally, so cleanup removes exactly the ones this macro created —
+  including markers you've since grouped with other shapes — and never touches
+  a normal text box that happens to say "TBU".
 
 ### PPT_Rider
 
 - **`SendSlideToRider`** — copies the slide you're on into
-  `<Deck name> - Rider.pptx`, next to the deck (or in `Documents\` when the
-  deck lives on OneDrive/SharePoint). Creates the rider on first use, appends
-  on every use after that, and preserves the slide's design/master/colors.
+  `<Deck name> - Rider.pptx`, next to the deck. Creates the rider on first
+  use, appends on every use after that, and preserves the slide's
+  design/master/colors.
 - **`MoveSlideToRider`** — same, then deletes the slide from the deck —
   "section it out". The slide is only deleted after the rider has saved
   successfully.
+
+Behavior notes:
+
+- Decks on OneDrive/SharePoint report a web URL instead of a folder, so their
+  rider goes to your real Documents folder (folder redirection and OneDrive
+  Known Folder Move are honored) with a short tag in the name — e.g.
+  `Pitch - Rider (3F2A).pptx` — so identically named decks in different deal
+  folders get separate riders.
+- If the rider is already open with unsaved edits of yours, the macro never
+  silently saves over them: a copy is appended and left unsaved for you, and a
+  move is refused until you've saved or discarded — so a ripped slide can
+  never exist only in an unsaved file.
 
 ## Notes
 

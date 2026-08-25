@@ -10,6 +10,10 @@ Option Explicit
 '    ApplyHeight     - give the remembered height to the selected shapes
 '    ApplySize       - give both dimensions to the selected shapes
 '
+'  Applying a size turns OFF "resize shape to fit text" (autofit) on
+'  the target shapes - autofit would silently snap them straight back
+'  to hugging their text. Aspect-ratio lock is parked and restored.
+'
 '  Layout tools:
 '    SwapShapes         - two selected shapes trade places (their
 '                         centers swap, so different-sized shapes stay
@@ -23,13 +27,17 @@ Option Explicit
 '    RemoveTBUMarkersOnSlide - clear every marker on the current slide
 '    RemoveTBUMarkersInDeck  - clear every marker in the presentation
 '
+'  Markers are tracked by an internal tag, and removal looks inside
+'  groups too - a marker grouped with the shape it flags still gets
+'  cleaned up.
+'
 '  The grabbed size lives until PowerPoint closes or the VBA project
 '  resets, and works across presentations. Grabbing is silent by
 '  design (no popup between grab and apply); flip CONFIRM_GRAB below
 '  if you want a confirmation.
 ' =====================================================================
 
-' --------------------------- TBU CONFIG ------------------------------
+' ----------------------------- CONFIG --------------------------------
 Private Const TBU_TEXT As String = "TBU"
 Private Const TBU_FONT As String = "Arial"
 Private Const TBU_FONT_SIZE As Single = 12
@@ -38,8 +46,9 @@ Private Const TBU_BOX_H As Single = 20            ' points
 Private Const TBU_FILL As Long = 65535            ' RGB(255, 255, 0) yellow
 Private Const TBU_TEXT_COLOR As Long = 192        ' RGB(192, 0, 0)   dark red
 Private Const TBU_LINE_COLOR As Long = 192        ' RGB(192, 0, 0)   dark red
+
+Private Const CONFIRM_GRAB As Boolean = False     ' popup after each grab?
 ' ---------------------------------------------------------------------
-Private Const CONFIRM_GRAB As Boolean = False
 
 Private mGrabbedW As Single
 Private mGrabbedH As Single
@@ -95,12 +104,24 @@ Private Sub ApplyGrabbed(ByVal doWidth As Boolean, ByVal doHeight As Boolean)
         Exit Sub
     End If
 
-    ' LockAspectRatio would drag the other dimension along, so it is
-    ' parked off while the new size goes in, then restored.
     Dim shp As Shape, lockState As MsoTriState
     For Each shp In shps
+        ' LockAspectRatio would drag the other dimension along, so it
+        ' is parked off while the new size goes in, then restored.
         lockState = shp.LockAspectRatio
         shp.LockAspectRatio = msoFalse
+
+        ' Autofit ("resize shape to fit text", the default on inserted
+        ' text boxes) recomputes the size from the text the moment it
+        ' changes, silently undoing the apply - so it stays off.
+        On Error Resume Next   ' lines, pictures, groups: no text frame
+        If shp.HasTextFrame Then
+            If shp.TextFrame.AutoSize <> ppAutoSizeNone Then
+                shp.TextFrame.AutoSize = ppAutoSizeNone
+            End If
+        End If
+        On Error GoTo 0
+
         If doWidth Then shp.Width = mGrabbedW
         If doHeight Then shp.Height = mGrabbedH
         shp.LockAspectRatio = lockState
@@ -246,23 +267,50 @@ Public Sub RemoveTBUMarkersInDeck()
     MsgBox removed & " TBU marker(s) removed from the deck.", vbInformation, "TBU"
 End Sub
 
+' Two-phase removal: first collect Shape references (recursing into
+' groups so a marker grouped with the shape it flags is still found),
+' then delete them. Deleting while iterating would fight the
+' collections' re-indexing - and a group dropping to one member can
+' dissolve, invalidating the very GroupItems being walked. Held Shape
+' references stay valid through all that.
 Private Function RemoveTBUFromSlide(ByVal sld As Slide) As Long
-    Dim i As Long
-    For i = sld.Shapes.Count To 1 Step -1
-        If sld.Shapes(i).Tags("TBU_MARKER") <> "" Then
-            sld.Shapes(i).Delete
-            RemoveTBUFromSlide = RemoveTBUFromSlide + 1
-        End If
-    Next i
+    Dim doomed As Collection
+    Set doomed = New Collection
+    CollectTBUMarkers sld.Shapes, doomed
+
+    Dim shp As Shape
+    For Each shp In doomed
+        shp.Delete
+    Next shp
+    RemoveTBUFromSlide = doomed.Count
 End Function
 
-Private Function CountTBUMarkers(ByVal sld As Slide) As Long
-    Dim shp As Shape
-    For Each shp In sld.Shapes
-        If shp.Tags("TBU_MARKER") <> "" Then
-            CountTBUMarkers = CountTBUMarkers + 1
+' shps is a Shapes or GroupShapes collection.
+Private Sub CollectTBUMarkers(ByVal shps As Object, ByVal doomed As Collection)
+    Dim i As Long
+    For i = 1 To shps.Count
+        If shps(i).Tags("TBU_MARKER") <> "" Then
+            doomed.Add shps(i)
+        ElseIf shps(i).Type = msoGroup Then
+            CollectTBUMarkers shps(i).GroupItems, doomed
         End If
-    Next shp
+    Next i
+End Sub
+
+Private Function CountTBUMarkers(ByVal sld As Slide) As Long
+    CountTBUMarkers = CountTBUInCollection(sld.Shapes)
+End Function
+
+Private Function CountTBUInCollection(ByVal shps As Object) As Long
+    Dim i As Long, n As Long
+    For i = 1 To shps.Count
+        If shps(i).Tags("TBU_MARKER") <> "" Then
+            n = n + 1
+        ElseIf shps(i).Type = msoGroup Then
+            n = n + CountTBUInCollection(shps(i).GroupItems)
+        End If
+    Next i
+    CountTBUInCollection = n
 End Function
 
 ' ----------------------------- Helpers -------------------------------
