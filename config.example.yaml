@@ -13,7 +13,7 @@
 # each venue's stated policy daily and corrects itself if a venue changes.
 #
 # DEFAULTS CHOSEN (adjust to taste):
-#   party of 2 · any night · 17:30-21:30, preferring 19:00-20:30
+#   party of 4 · any night · 17:30-21:30, preferring 19:00-20:30
 #   The five hardest rooms auto-BOOK; the rest NOTIFY your phone.
 #   dry_run is ON: nothing books until you flip it to false.
 
@@ -43,7 +43,7 @@ targets:
   - name: Carbone
     slug: carbone
     venue_id: 6194
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 25
     days_ahead_max: 31
@@ -62,7 +62,7 @@ targets:
   - name: Torrisi
     slug: torrisi
     venue_id: 64593
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 25
     days_ahead_max: 31
@@ -81,7 +81,7 @@ targets:
   - name: 4 Charles Prime Rib
     slug: 4-charles-prime-rib
     venue_id: 834
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 18
     days_ahead_max: 22
@@ -99,7 +99,7 @@ targets:
   - name: Tatiana
     slug: tatiana
     venue_id: 65452
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 24
     days_ahead_max: 29
@@ -117,7 +117,7 @@ targets:
   - name: Cote
     slug: cote-nyc
     venue_id: 72271
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 25
     days_ahead_max: 31
@@ -135,7 +135,7 @@ targets:
   - name: Raoul's
     slug: raoulsrestaurant
     venue_id: 7241
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 25
     days_ahead_max: 31
@@ -161,7 +161,7 @@ targets:
   - name: I Sodi
     slug: i-sodi
     venue_id: 443
-    party_size: 2
+    party_size: 4
     action: notify
     days_ahead_min: 0
     days_ahead_max: 30
@@ -174,7 +174,7 @@ targets:
   - name: Via Carota
     slug: via-carota
     venue_id: 2567
-    party_size: 2
+    party_size: 4
     action: notify
     days_ahead_min: 0
     days_ahead_max: 30
@@ -188,7 +188,7 @@ targets:
   - name: Minetta Tavern
     slug: minetta-tavern
     venue_id: 9846
-    party_size: 2
+    party_size: 4
     action: notify
     days_ahead_min: 0
     days_ahead_max: 30
@@ -201,7 +201,7 @@ targets:
   - name: Balthazar
     slug: balthazar-nyc
     venue_id: 50227
-    party_size: 2
+    party_size: 4
     action: notify
     days_ahead_min: 0
     days_ahead_max: 30
@@ -214,7 +214,7 @@ targets:
   - name: Lucali
     slug: lucali-ny
     venue_id: 54876
-    party_size: 2
+    party_size: 4
     action: notify
     days_ahead_min: 0
     days_ahead_max: 30
@@ -244,7 +244,7 @@ targets:
   - name: The Corner Store
     slug: thecornerstore
     provider: sevenrooms
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 0
     days_ahead_max: 15
@@ -266,7 +266,7 @@ targets:
   - name: The Eighty Six
     slug: theeightysix
     provider: sevenrooms
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 0
     days_ahead_max: 15
@@ -289,7 +289,7 @@ targets:
   - name: Or'esh
     slug: 450wbroadway
     provider: sevenrooms
-    party_size: 2
+    party_size: 4
     action: book
     days_ahead_min: 0
     days_ahead_max: 7      # only a 7-day window ever exists
@@ -308,7 +308,7 @@ targets:
   - name: Borgo
     slug: borgo
     venue_id: 84290
-    party_size: 2
+    party_size: 4
     action: notify
     days_ahead_min: 0
     days_ahead_max: 30
