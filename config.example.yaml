@@ -5,9 +5,12 @@
 #   On Resy, hunted below:  Carbone, Torrisi, 4 Charles, Tatiana, Cote,
 #                           Raoul's, I Sodi, Via Carota, Minetta Tavern,
 #                           Balthazar, Borgo, Lucali
-#   Not found on Resy (searched Aug 2026 under every name variant):
-#     - The Eighty Six .. no Resy NYC listing; if you have its Resy page URL,
-#                         the slug in that URL is all that's needed to add it
+#   On DoorDash (whose reservations run on SevenRooms), hunted below:
+#                           The Corner Store, The Eighty Six
+#   Still missing:
+#     - O'resh .......... found on neither platform under any spelling tried;
+#                         paste its booking link from the DoorDash app or the
+#                         restaurant's site and the slug in that URL adds it
 #
 # Every venue id, slug, and drop time below was verified against the live
 # Resy API on 2026-08-25. Drop targets use `auto: true`, so the bot re-reads
@@ -214,6 +217,43 @@ targets:
     priority: 3
     notes: "Historically walk-in only; a Resy listing exists. If it never shows
       inventory, that is their policy, not a bot problem."
+
+  # ------------------------------------------- DoorDash / SevenRooms venues
+  # These book without an account: fill GUEST_FIRST_NAME etc. in .env, the
+  # reservation lands under that name, confirmation goes to that email.
+  # Both venues currently show request-queue rows for most days -- the bot
+  # only acts on real bookable inventory, which appears when tables free up.
+  # If a venue demands a captcha at checkout, auto-book fails LOUDLY: your
+  # phone gets an urgent alert with the link so you can grab it by hand.
+  - name: The Corner Store
+    slug: thecornerstore
+    provider: sevenrooms
+    party_size: 2
+    action: book
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    poll_interval_seconds: 60
+    max_bookings: 1
+    priority: 7
+
+  - name: The Eighty Six
+    slug: theeightysix
+    provider: sevenrooms
+    party_size: 2
+    action: book
+    days_ahead_min: 0
+    days_ahead_max: 30
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    poll_interval_seconds: 60
+    max_bookings: 1
+    priority: 7
 
   - name: Borgo
     slug: borgo

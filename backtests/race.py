@@ -59,9 +59,10 @@ SLOTS_MIN, SLOTS_MAX = 3, 6
 @dataclass
 class RaceSlot:
     slot: Slot
-    visible_at: float          # monotonic, when Resy shows it
+    visible_at: float          # monotonic, when the provider shows it
     claimed_at: float          # when the fastest rival takes it
     lapses_at: float | None    # hold bounce-back, if any
+    held_by_us: bool = False   # sevenrooms: our hold locks the table
 
     def state(self, t: float) -> str:
         if t < self.visible_at:
@@ -74,10 +75,20 @@ class RaceSlot:
 
 
 class RaceClient:
-    """Duck-types the three ResyClient methods the burst path uses, with real
-    per-request latency and a time-indexed rival model."""
+    """Duck-types the three client methods the burst path uses, with real
+    per-request latency and a time-indexed rival model.
 
-    def __init__(self, race_slots: list[RaceSlot], rng: random.Random):
+    Provider semantics differ at the claim step and the difference is modeled:
+
+    - resy: `details` then `book` are separate races -- a rival can take the
+      table between them (evaluated independently at each server arrival).
+    - sevenrooms: the HOLD locks the table; win the hold and completion cannot
+      be stolen. Rivals likewise lock at their claim instant.
+    """
+
+    def __init__(self, race_slots: list[RaceSlot], rng: random.Random,
+                 provider: str = "resy"):
+        self.provider = provider
         self.race_slots = race_slots
         self.rng = rng
         self.find_calls = 0
@@ -90,7 +101,8 @@ class RaceClient:
     def _t(self) -> float:
         return time.monotonic() - self.t0
 
-    async def find(self, *, venue_id, day, party_size, throttle=True, retries=2):
+    async def find(self, *, venue_id, day, party_size, venue_slug=None, throttle=True,
+                   retries=2):
         self.find_calls += 1
         rtt = self._rtt()
         t_server = self._t() + rtt / 2      # state evaluated at server arrival
@@ -106,7 +118,12 @@ class RaceClient:
         await asyncio.sleep(rtt)
         rs = self._lookup(slot)
         if rs.state(t_server) != "free":
-            raise SlotTaken("gone at details")
+            raise SlotTaken("gone at details/hold")
+        if self.provider == "sevenrooms":
+            # The hold locks the table for us; the race is over here.
+            rs.claimed_at = -1.0
+            rs.lapses_at = None
+            rs.held_by_us = True
         return f"bt::{slot.config_id}"
 
     async def book(self, slot: Slot, book_token: str):
@@ -114,9 +131,11 @@ class RaceClient:
         t_server = self._t() + rtt / 2
         await asyncio.sleep(rtt)
         rs = self._lookup(slot)
-        if rs.state(t_server) != "free":
+        if self.provider == "sevenrooms":
+            if not getattr(rs, "held_by_us", False):
+                raise SlotTaken("hold vanished")
+        elif rs.state(t_server) != "free":
             raise SlotTaken("beaten at book")
-        # We own it now: no rival can reclaim a booked table.
         rs.claimed_at = -1.0
         rs.lapses_at = None
         self.booked.append(rs)
@@ -162,7 +181,7 @@ def _make_slots(rng: random.Random, lead_s: float) -> list[RaceSlot]:
     return out
 
 
-async def run_trial(profile: dict, seed: int) -> dict:
+async def run_trial(profile: dict, seed: int, provider: str = "resy") -> dict:
     rng = random.Random(seed)
     drop_overrides = {k: v for k, v in profile.items() if k not in ("name", "lead_ms")}
     lead_ms = profile.get("lead_ms", 250)
@@ -172,7 +191,7 @@ async def run_trial(profile: dict, seed: int) -> dict:
         earliest="17:00", latest="22:00",
         drop={"days_ahead": 30, "at": "10:00", "lead_ms": lead_ms, **drop_overrides},
     )
-    client = RaceClient(_make_slots(rng, lead_ms / 1000.0), rng)
+    client = RaceClient(_make_slots(rng, lead_ms / 1000.0), rng, provider=provider)
     store = Store(":memory:")
     hunter = Hunter(
         config=Config(settings=Settings(), targets=[target]),
@@ -230,11 +249,14 @@ STRATEGIES = [
 ]
 
 
-async def run_strategy(profile: dict, trials: int, concurrency: int = 60) -> dict:
+async def run_strategy(profile: dict, trials: int, concurrency: int = 60,
+                       provider: str = "resy") -> dict:
     results = []
     for chunk_start in range(0, trials, concurrency):
         chunk = range(chunk_start, min(chunk_start + concurrency, trials))
-        results.extend(await asyncio.gather(*(run_trial(profile, 1000 + i) for i in chunk)))
+        results.extend(await asyncio.gather(
+            *(run_trial(profile, 1000 + i, provider) for i in chunk)
+        ))
     wins = [r for r in results if r["won"]]
     times = sorted(r["t_book"] for r in wins)
     return {
@@ -250,13 +272,16 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=240)
     ap.add_argument("--only", type=str, default=None)
+    ap.add_argument("--provider", type=str, default="resy",
+                    choices=["resy", "sevenrooms"])
     args = ap.parse_args()
 
     strategies = [s for s in STRATEGIES if args.only is None or args.only in s["name"]]
     out = []
     for profile in strategies:
         t0 = time.monotonic()
-        summary = await run_strategy(profile, args.trials)
+        summary = await run_strategy(profile, args.trials, provider=args.provider)
+        summary["provider"] = args.provider
         summary["wall_s"] = round(time.monotonic() - t0, 1)
         out.append(summary)
         print(json.dumps(summary), flush=True)

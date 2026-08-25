@@ -19,6 +19,7 @@ from .matching import candidate_days, describe_target, drop_target_day
 from .models import ResyError
 from .notify import Notifier
 from .resy import DEFAULT_API_KEY, ResyClient
+from .sevenrooms import SevenRoomsClient
 from .state import Store
 from .timeutil import humanize_delta, next_occurrence_nyc, now_nyc, today_nyc
 
@@ -60,15 +61,22 @@ def _make_client(config: Config, secrets: Secrets) -> ResyClient:
 
 async def _with_hunter(config: Config, secrets: Secrets, fn):
     client = _make_client(config, secrets)
+    sr_client = SevenRoomsClient(
+        rate=config.settings.request_rate,
+        burst=config.settings.request_burst,
+        guest=secrets.guest_info(),
+    )
     notifier = Notifier(secrets)
     store = Store(config.settings.state_path)
     hunter = Hunter(
-        config=config, secrets=secrets, client=client, store=store, notifier=notifier
+        config=config, secrets=secrets, client=client, store=store,
+        notifier=notifier, sevenrooms_client=sr_client,
     )
     try:
         return await fn(hunter)
     finally:
         await client.aclose()
+        await sr_client.aclose()
         await notifier.aclose()
         store.close()
 
@@ -374,7 +382,7 @@ def simulate(
     fake venue. It is the honest way to find out that `days_ahead` is wrong, or
     that your time window excludes everything, before 9am on a Friday.
     """
-    from .simulator import VENUE_ID, SimResy, slot_at
+    from .simulator import VENUE_ID, SimResy, SimSevenRooms, slot_at, sr_slot_at
 
     config, _ = _load(config_path)
     target = config.target(target_name)
@@ -383,30 +391,46 @@ def simulate(
         raise typer.Exit(1)
 
     target = target.model_copy(deep=True)
-    target.venue_id = VENUE_ID
     days_out = target.drop.days_ahead if target.drop else max(1, target.days_ahead_min)
+
+    # Route the rehearsal to the target's own provider: a SevenRooms target
+    # must play against the SevenRooms fake, never touch the real network.
+    if target.provider == "sevenrooms":
+        sim = SimSevenRooms()
+        make_slot = sr_slot_at
+        target.slug = "sim-corner-store"
+    else:
+        sim = SimResy()
+        make_slot = slot_at
+        target.venue_id = VENUE_ID
 
     # Place the synthetic tables in the middle of whatever window the user asked
     # for, so the simulation tests their ranking rather than our guess at it.
     hhmm = _midpoint(target)
-    sim = SimResy()
-    secrets = Secrets(resy_email="sim@example.com", resy_password="simulated")
+    secrets = Secrets(
+        resy_email="sim@example.com", resy_password="simulated",
+        guest_first_name="Sim", guest_last_name="Ulation",
+        guest_phone="+10000000000", guest_email="sim@example.com",
+    )
 
     console.print(f"[bold]Simulating:[/] {target.name}  [dim]({scenario})[/]")
     console.print(f"[dim]{describe_target(target)}[/]\n")
 
     async def _sim():
         client = _make_client(config, secrets)
+        sr_client = SevenRoomsClient(rate=200, burst=200, guest=secrets.guest_info())
         notifier = Notifier(Secrets())          # no channels: alerts go to the log
         store = Store(":memory:")
         hunter = Hunter(
             config=Config(settings=config.settings, targets=[target]),
             secrets=secrets, client=client, store=store, notifier=notifier,
+            sevenrooms_client=sr_client,
         )
         try:
             with sim.mock():
                 await hunter.login()
 
+                _ = make_slot  # bound below per scenario
                 if scenario == "cancellation":
                     # Place it on a date the target would actually check, so
                     # this exercises the user's real weekday/date filters
@@ -419,26 +443,30 @@ def simulate(
                             "so it would never find anything. Fix that first."
                         )
                         return None
-                    day = days[len(days) // 2]
+                    # A near day: the rotating sweep always covers those first.
+                    day = days[min(len(days) - 1, 1)]
                     offset = (day - today_nyc()).days
                     console.print(
                         f"[dim]A table appears mid-poll on {day:%a %b %-d} "
                         f"({offset}d out)...[/]"
                     )
-                    sim.add(slot_at(offset, hhmm))
+                    sim.add(make_slot(offset, hhmm))
                     result = await hunter.poll_once(target)
 
                 elif scenario == "soldout":
                     console.print("[dim]Nothing is ever released...[/]")
-                    result = await _sim_drop(hunter, target, sim, None, hhmm, days_out)
+                    result = await _sim_drop(hunter, target, sim, None, hhmm, days_out,
+                                             make_slot)
 
                 elif scenario == "contested":
                     console.print("[dim]Two competitors hold the table first...[/]")
-                    result = await _sim_drop(hunter, target, sim, 2, hhmm, days_out)
+                    result = await _sim_drop(hunter, target, sim, 2, hhmm, days_out,
+                                             make_slot)
 
                 else:  # drop
                     console.print("[dim]Inventory drops in a few seconds...[/]")
-                    result = await _sim_drop(hunter, target, sim, 0, hhmm, days_out)
+                    result = await _sim_drop(hunter, target, sim, 0, hhmm, days_out,
+                                             make_slot)
 
             console.print()
             if result is not None:
@@ -457,19 +485,20 @@ def simulate(
                 )
         finally:
             await client.aclose()
+            await sr_client.aclose()
             await notifier.aclose()
             store.close()
 
     asyncio.run(_sim())
 
 
-async def _sim_drop(hunter, target, sim, contested, hhmm, days_out):
+async def _sim_drop(hunter, target, sim, contested, hhmm, days_out, make_slot):
     """Arm a real snipe against simulated inventory a few seconds out."""
-    from .simulator import slot_at
-
     lead = 4.0
     if target.drop is None:
-        target.drop = DropConfig()
+        # Poll-only targets get a synthetic drop for the rehearsal; its
+        # released day must match where the fake table is placed.
+        target.drop = DropConfig(days_ahead=days_out)
     target.drop = target.drop.model_copy(
         update={
             "at": (now_nyc() + timedelta(seconds=lead)).time(),
@@ -483,7 +512,7 @@ async def _sim_drop(hunter, target, sim, contested, hhmm, days_out):
     target.weekdays = []
     target.dates = []
     if contested is not None:
-        sim.release_in(lead, slot_at(days_out, hhmm, contested=contested))
+        sim.release_in(lead, make_slot(days_out, hhmm, contested=contested))
     return await hunter.snipe(target)
 
 
@@ -624,23 +653,42 @@ def doctor(
             problems += 1
             return
 
+        sr_targets = [t for t in config.targets if t.provider == "sevenrooms"]
+        if sr_targets:
+            console.print("\n[bold]SevenRooms (DoorDash) guest details[/]")
+            info = secrets.guest_info()
+            missing = [k for k, v in info.items() if not v]
+            if any(t.action == "book" for t in sr_targets) and missing:
+                console.print(
+                    f"  [yellow]warn[/] booking needs "
+                    f"{', '.join('GUEST_' + m.upper() for m in missing)} in .env "
+                    "-- reservations are placed under this name"
+                )
+            elif not missing:
+                console.print(f"  [green]ok[/] booking as {info['first_name']} "
+                              f"{info['last_name']} ({info['email']})")
+
         console.print("\n[bold]Targets[/]")
         for target in config.targets:
             mark = "" if target.enabled else " [dim](disabled)[/]"
+            provider_tag = (
+                " [dim](doordash/sevenrooms)[/]" if target.provider == "sevenrooms" else ""
+            )
             try:
                 venue_id = await hunter.resolve_venue(target)
                 days = candidate_days(target, today_nyc())
                 console.print(
-                    f"  [green]ok[/] {target.name}{mark} -> venue {venue_id}, "
+                    f"  [green]ok[/] {target.name}{mark}{provider_tag} -> venue {venue_id}, "
                     f"{len(days)} date(s), {describe_target(target)}"
                 )
-                # Live availability probe: verifies /4/find works from THIS
-                # network. Resy's edge throttles that endpoint per-IP, so the
-                # only meaningful test is from the machine that will hunt.
+                # Live availability probe: verifies the provider answers from
+                # THIS network. Edges throttle per-IP, so the only meaningful
+                # test is from the machine that will hunt.
                 if days:
                     try:
-                        probe = await hunter.client.find(
+                        probe = await hunter.client_for(target).find(
                             venue_id=venue_id,
+                            venue_slug=target.slug,
                             day=days[0].isoformat(),
                             party_size=target.party_size,
                         )
@@ -659,7 +707,12 @@ def doctor(
                     console.print(
                         "      [yellow]warn[/] action=book but no payment method on file"
                     )
-                if target.drop and target.drop.enabled:
+                if target.drop and target.drop.enabled and target.provider != "resy":
+                    console.print(
+                        "      [dim]note[/] drop timing cannot be verified against a "
+                        "SevenRooms page; confirm it from the first drop's log"
+                    )
+                if target.drop and target.drop.enabled and target.provider == "resy":
                     next_drop = next_occurrence_nyc(target.drop.at, now_nyc())
                     day = drop_target_day(target, next_drop.date())
                     if day is None:

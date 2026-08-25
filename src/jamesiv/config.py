@@ -17,6 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .timeutil import parse_hhmm
 
 Action = Literal["book", "notify"]
+Provider = Literal["resy", "sevenrooms"]
 
 WEEKDAY_NAMES = {
     "mon": 0, "monday": 0,
@@ -49,6 +50,21 @@ class Secrets(BaseSettings):
 
     pushover_token: str = ""
     pushover_user: str = ""
+
+    # Guest details for SevenRooms (DoorDash) bookings, which are made without
+    # an account -- the reservation is placed under this name.
+    guest_first_name: str = ""
+    guest_last_name: str = ""
+    guest_phone: str = ""
+    guest_email: str = ""
+
+    def guest_info(self) -> dict[str, str]:
+        return {
+            "first_name": self.guest_first_name,
+            "last_name": self.guest_last_name,
+            "phone": self.guest_phone,
+            "email": self.guest_email or self.resy_email,
+        }
 
     @property
     def has_credentials(self) -> bool:
@@ -136,6 +152,8 @@ class Target(BaseModel):
 
     name: str
     slug: str
+    # "resy", or "sevenrooms" -- the system behind DoorDash reservations.
+    provider: Provider = "resy"
     location: str = "ny"
     venue_id: int | None = None
 
@@ -170,6 +188,12 @@ class Target(BaseModel):
 
     drop: DropConfig | None = None
     poll_interval_seconds: float = Field(default=45.0, ge=5.0)
+    # Requests per poll cycle. A 0-30 day range is 31 days; sweeping all of
+    # them every poll is ~40 requests/minute of sustained noise. Instead each
+    # poll checks the 3 nearest days (where cancellations are hottest and
+    # lead-time matters) plus a rotating chunk of the rest, covering the full
+    # range every few cycles.
+    poll_days_per_sweep: int = Field(default=10, ge=1)
     # Randomised +/- this fraction so we do not become a metronome.
     poll_jitter: float = Field(default=0.35, ge=0.0, le=1.0)
 

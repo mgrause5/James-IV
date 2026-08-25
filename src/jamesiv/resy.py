@@ -80,6 +80,9 @@ class TokenBucket:
 
 
 class ResyClient:
+    provider = "resy"
+    clock_probe_path = "/3/venue"
+
     def __init__(
         self,
         *,
@@ -266,6 +269,7 @@ class ResyClient:
         venue_id: int,
         day: str,
         party_size: int,
+        venue_slug: str | None = None,  # accepted for provider parity; unused
         throttle: bool = True,
         retries: int = 2,
     ) -> list[Slot]:

@@ -1,0 +1,14 @@
+{"name": "1-shot", "trials": 400, "take_rate": 0.005, "avg_requests": 1.0, "p50_time_to_book": 0.33447437499989974, "provider": "sevenrooms", "wall_s": 4.2}
+{"name": "3-tight", "trials": 400, "take_rate": 0.72, "avg_requests": 2.3775, "p50_time_to_book": 0.5483592259997749, "provider": "sevenrooms", "wall_s": 6.3}
+{"name": "5-quick (shipped)", "trials": 400, "take_rate": 0.955, "avg_requests": 2.605, "p50_time_to_book": 0.8046891160001906, "provider": "sevenrooms", "wall_s": 17.7}
+{"name": "5-tight", "trials": 400, "take_rate": 0.79, "avg_requests": 2.9175, "p50_time_to_book": 0.5496454359999916, "provider": "sevenrooms", "wall_s": 9.3}
+{"name": "5-spread", "trials": 400, "take_rate": 0.945, "avg_requests": 2.6225, "p50_time_to_book": 0.6545699560001594, "provider": "sevenrooms", "wall_s": 70.4}
+{"name": "10-mixed", "trials": 400, "take_rate": 0.8525, "avg_requests": 5.44, "p50_time_to_book": 0.7881131069998446, "provider": "sevenrooms", "wall_s": 19.3}
+{"name": "25-volley", "trials": 400, "take_rate": 0.915, "avg_requests": 10.4925, "p50_time_to_book": 0.6554611379997368, "provider": "sevenrooms", "wall_s": 16.3}
+{"name": "100-barrage", "trials": 400, "take_rate": 1.0, "avg_requests": 23.49, "p50_time_to_book": 0.5910048839996307, "provider": "sevenrooms", "wall_s": 17.7}
+{"name": "5-spread lead=100", "trials": 400, "take_rate": 0.95, "avg_requests": 2.2975, "p50_time_to_book": 0.6286915730001965, "provider": "sevenrooms", "wall_s": 70.3}
+{"name": "5-spread lead=0", "trials": 400, "take_rate": 0.9625, "avg_requests": 1.875, "p50_time_to_book": 0.3259882000002108, "provider": "sevenrooms", "wall_s": 70.4}
+{"name": "5-quick lead=100", "trials": 400, "take_rate": 0.9675, "avg_requests": 2.2725, "p50_time_to_book": 0.7800129100000959, "provider": "sevenrooms", "wall_s": 18.1}
+{"name": "5-quick lead=0", "trials": 400, "take_rate": 0.9925, "avg_requests": 1.8225, "p50_time_to_book": 0.3224164080002083, "provider": "sevenrooms", "wall_s": 17.0}
+{"name": "5-quick lead=600", "trials": 400, "take_rate": 0.8875, "avg_requests": 3.1975, "p50_time_to_book": 1.270029508999869, "provider": "sevenrooms", "wall_s": 18.3}
+{"name": "5-quick lead=1200", "trials": 400, "take_rate": 0.785, "avg_requests": 4.2725, "p50_time_to_book": 1.7642904479998833, "provider": "sevenrooms", "wall_s": 18.8}

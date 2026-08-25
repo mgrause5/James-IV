@@ -28,7 +28,8 @@ class FakeClient:
         self.booked: list[Slot] = []
         self.details_calls = 0
 
-    async def find(self, *, venue_id, day, party_size, throttle=True):
+    async def find(self, *, venue_id, day, party_size, venue_slug=None, throttle=True,
+                   retries=2):
         return [s for s in self.slots if s.day.isoformat() == day and s.party_size == party_size]
 
     async def venue_by_slug(self, slug, location="ny"):

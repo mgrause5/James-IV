@@ -25,6 +25,8 @@ from .models import AuthError, Booking, RateLimited, ResyError, Slot, SlotTaken
 from .notify import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_URGENT, Notifier, resy_url
 from .policy import DropPolicy, extract_policy
 from .resy import ResyClient
+from .sevenrooms import deep_link as sevenrooms_deep_link
+from .sevenrooms import venue_key as sevenrooms_venue_key
 from .state import Store
 from .timeutil import (
     ZERO_OFFSET,
@@ -53,10 +55,12 @@ class Hunter:
         client: ResyClient,
         store: Store,
         notifier: Notifier,
+        sevenrooms_client=None,
     ):
         self.config = config
         self.secrets = secrets
         self.client = client
+        self.sevenrooms_client = sevenrooms_client
         self.store = store
         self.notifier = notifier
         self.bookings_this_run = 0
@@ -66,10 +70,31 @@ class Hunter:
         self._auth_generation = 0
         self._policy_seen: dict[str, str] = {}
         self._blind_polls: dict[str, int] = {}
+        self._poll_cursor: dict[str, int] = {}
+
+    def client_for(self, target: Target):
+        """The provider client this target hunts through."""
+        if target.provider == "sevenrooms":
+            if self.sevenrooms_client is None:
+                raise ResyError(
+                    f"{target.name} uses provider 'sevenrooms' but no SevenRooms "
+                    "client was configured"
+                )
+            return self.sevenrooms_client
+        return self.client
+
+    def deep_link_for(self, target: Target, *, day: str, party_size: int) -> str:
+        if target.provider == "sevenrooms":
+            return sevenrooms_deep_link(target.slug)
+        return resy_url(target.slug, day=day, party_size=party_size, location=target.location)
 
     # ------------------------------------------------------------------ setup
 
     async def login(self) -> None:
+        if not any(t.provider == "resy" for t in self.config.active_targets):
+            log.info("No Resy targets configured; skipping Resy login "
+                     "(SevenRooms bookings are account-less)")
+            return
         if self.secrets.resy_auth_token:
             self.client.set_token(
                 self.secrets.resy_auth_token, self.secrets.resy_payment_method_id
@@ -123,6 +148,10 @@ class Hunter:
 
     async def resolve_venue(self, target: Target) -> int:
         """Slug -> venue id, cached. Configured `venue_id` short-circuits the lookup."""
+        if target.provider == "sevenrooms":
+            # SevenRooms is slug-keyed; the synthetic CRC id keeps slot
+            # identity (dedupe, same-night guards) distinct per venue.
+            return sevenrooms_venue_key(target.slug)
         if target.venue_id:
             return target.venue_id
         if target.slug in self._venue_ids:
@@ -146,11 +175,13 @@ class Hunter:
         attempts_made = 0
         last_error: ResyError | None = None
 
+        client = self.client_for(target)
         for day in days:
             for party_size in target.party_sizes:
                 try:
-                    slots = await self.client.find(
+                    slots = await client.find(
                         venue_id=venue_id,
+                        venue_slug=target.slug,
                         day=day.isoformat(),
                         party_size=party_size,
                         throttle=throttle,
@@ -242,7 +273,12 @@ class Hunter:
             except AuthError:
                 raise  # see search(): never let this be mistaken for a dead slot
             except ResyError as exc:
+                # Not a lost race -- the booking machinery itself failed (bad
+                # payload, captcha requirement, provider change). The table may
+                # still be free, so this must reach the owner's phone NOW.
                 log.error("Booking error on %s: %s", slot, exc)
+                await self.alert_slots(target, [slot], missed=True, force=True,
+                                       reason=str(exc))
                 continue
         return None
 
@@ -254,8 +290,9 @@ class Hunter:
             if self.store.booking_count(target.name) >= target.max_bookings:
                 raise SlotTaken(f"{target.name} hit its cap while we waited")
 
-            book_token = await self.client.book_token_for(slot)
-            resy_token, reservation_id = await self.client.book(slot, book_token)
+            client = self.client_for(target)
+            book_token = await client.book_token_for(slot)
+            resy_token, reservation_id = await client.book(slot, book_token)
 
             booking = Booking(
                 resy_token=resy_token,
@@ -273,12 +310,7 @@ class Hunter:
             f"Booked: {target.name}",
             f"{slot}\nConfirmation {reservation_id or resy_token}",
             priority=PRIORITY_URGENT,
-            url=resy_url(
-                target.slug,
-                day=slot.day.isoformat(),
-                party_size=slot.party_size,
-                location=target.location,
-            ),
+            url=self.deep_link_for(target, day=slot.day.isoformat(), party_size=slot.party_size),
             tags=["tada"],
         )
         return booking
@@ -290,6 +322,8 @@ class Hunter:
         *,
         missed: bool = False,
         dry_run: bool = False,
+        force: bool = False,
+        reason: str | None = None,
     ) -> None:
         fresh = [s for s in slots if self.store.is_new_slot(s, target.name)]
         if not fresh:
@@ -298,32 +332,49 @@ class Hunter:
         if dry_run:
             title = f"[dry run] Would book: {target.name}"
         elif missed:
-            if not self.config.settings.notify_on_miss:
+            if not force and not self.config.settings.notify_on_miss:
                 return
-            title = f"Missed: {target.name}"
+            title = f"Auto-book failed: {target.name}" if force else f"Missed: {target.name}"
         else:
             title = f"Open table: {target.name}"
 
         body = "\n".join(str(s) for s in fresh)
+        if force:
+            if reason:
+                body += f"\nWhy: {reason}"
+            body += "\nThe table may still be free -- tap to book by hand."
         top = fresh[0]
         await self.notifier.send(
             title,
             body,
-            priority=PRIORITY_HIGH,
-            url=resy_url(
-                target.slug,
-                day=top.day.isoformat(),
-                party_size=top.party_size,
-                location=target.location,
-            ),
+            priority=PRIORITY_URGENT if force else PRIORITY_HIGH,
+            url=self.deep_link_for(target, day=top.day.isoformat(), party_size=top.party_size),
             tags=["fork_and_knife"],
         )
         self.store.log_event("alert", body.replace("\n", " | "), target.name)
 
     # ------------------------------------------------------------- poll engine
 
-    async def poll_once(self, target: Target) -> Booking | None:
+    def _sweep_days(self, target: Target) -> list:
+        """The days this poll cycle checks: the nearest few always (same-week
+        cancellations are the hot zone), plus a rotating chunk of the rest so
+        the full range is covered every few cycles without sweeping 30+ days
+        of requests every single poll."""
         days = candidate_days(target, today_nyc())
+        chunk = target.poll_days_per_sweep
+        if len(days) <= chunk:
+            return days
+
+        near_n = min(3, chunk - 1)
+        near, far = days[:near_n], days[near_n:]
+        take = chunk - near_n
+        cursor = self._poll_cursor.get(target.name, 0) % len(far)
+        rotated = (far[cursor:] + far[:cursor])[:take]
+        self._poll_cursor[target.name] = (cursor + take) % len(far)
+        return near + rotated
+
+    async def poll_once(self, target: Target) -> Booking | None:
+        days = self._sweep_days(target)
         if not days:
             return None
         slots = await self.search(target, days)
@@ -366,6 +417,12 @@ class Hunter:
 
     async def resolve_drop_policy(self, target: Target) -> DropPolicy | None:
         """Read the venue's release policy off its own Resy page."""
+        if target.provider != "resy":
+            if self._policy_seen.get(target.name) != "unsupported":
+                self._policy_seen[target.name] = "unsupported"
+                log.info("%s: policy discovery is Resy-only; set drop.at/days_ahead "
+                         "by hand for %s venues", target.name, target.provider)
+            return None
         try:
             raw = await self.client.venue_raw(target.slug, location=target.location)
         except AuthError:
@@ -384,6 +441,11 @@ class Hunter:
         every applied change is logged so `auto` never means `silent`.
         """
         assert target.drop is not None
+        if target.provider != "resy":
+            # Discovery is Resy-only; the configured drop timing simply stands.
+            # resolve_drop_policy already logged this once -- do not also warn
+            # "no policy found" every cycle.
+            return
         policy = await self.resolve_drop_policy(target)
         marker = policy.describe() if policy else None
 
@@ -456,8 +518,9 @@ class Hunter:
         venue_id = await self.resolve_venue(target)
 
         # Sync the clock and warm the socket while there is still time to spare.
+        client = self.client_for(target)
         offset = await measure_clock_offset(
-            self.client.http, "/3/venue", probes=drop.clock_probes
+            client.http, client.clock_probe_path, probes=drop.clock_probes
         )
         if offset.is_trustworthy:
             log.info(
@@ -467,7 +530,7 @@ class Hunter:
         else:
             log.warning("Clock sync inconclusive; firing on the local clock")
             offset = ZERO_OFFSET
-        await self.client.warm()
+        await client.warm()
 
         fire_at = offset.local_time_for_server_time(drop_instant) - timedelta(
             milliseconds=drop.lead_ms
@@ -498,6 +561,7 @@ class Hunter:
         landed and we got a shot at it, or the room sold out and no amount of
         further requests will help.
         """
+        client = self.client_for(target)
         started = now_utc()
         deadline = started + timedelta(seconds=drop.burst_seconds)
         attempts = 0
@@ -523,8 +587,9 @@ class Hunter:
                             stop.set()
                             return
                         attempts += 1
-                        slots = await self.client.find(
+                        slots = await client.find(
                             venue_id=venue_id,
+                            venue_slug=target.slug,
                             day=day.isoformat(),
                             party_size=party_size,
                             throttle=False,

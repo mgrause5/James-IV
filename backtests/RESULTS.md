@@ -76,3 +76,34 @@ average drop, indistinguishable from a fast human refreshing the page.
 
 Reproduce: `python backtests/race.py --trials 400`
 (env `RACE_CLOCK_SIGMA=0.250` for the pessimistic-sync variant).
+
+---
+
+# Round 2: the same race under SevenRooms (DoorDash) semantics
+
+SevenRooms changes one mechanic: a **hold locks the table** while checkout
+completes, so winning the hold wins the race — there is no steal window
+between "details" and "book" as on Resy. The full strategy table was re-run
+under those semantics (`--provider sevenrooms`, 5,600 trials, raw data in
+`results-sevenrooms-2026-08-25.jsonl`):
+
+| Strategy | Resy | SevenRooms |
+|---|---|---|
+| 3-tight | 70.8% | 72.0% |
+| 5-tight | 78.2% | 79.0% |
+| 5-quick lead=250 | 92.2% | 95.5% |
+| **5-quick lead=100 (shipped)** | **94.0%** | **96.8%** |
+| 5-quick lead=0 | 97.8% | 99.2% |
+| 25-volley | 90.8% | 91.5% |
+| 100-barrage | 99.2% | 100% |
+
+Two conclusions:
+
+1. **The ordering is identical**, so every strategy finding transfers:
+   coverage beats density, every millisecond of lead costs, spam wins at
+   4-10x the noise. The shipped profile needs no per-provider tuning.
+2. **Hold-lock uniformly helps us** (+1-3 points everywhere): our checkout
+   cannot be stolen mid-flight, and the same applies to the details-to-book
+   gap that occasionally loses a Resy race. The bot books through the hold
+   the instant it sees inventory, which is exactly the right exploitation
+   of that mechanic.

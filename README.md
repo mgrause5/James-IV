@@ -281,6 +281,20 @@ you faster at a drop — the burst path bypasses the bucket anyway — it just m
 you noisier the other 23 hours of the day, which is how an account gets flagged.
 A flagged account books nothing.
 
+## DoorDash venues (SevenRooms)
+
+Some NYC rooms — The Corner Store, The Eighty Six — book through DoorDash,
+whose reservation system is SevenRooms (acquired 2025). The bot speaks that
+API too: set `provider: sevenrooms` on a target and fill the `GUEST_*` fields
+in `.env` (these bookings are account-less; the reservation lands under that
+name). Differences worth knowing: policy auto-discovery is Resy-only, so set
+any drop timing by hand; a hold locks the table during checkout, which works
+in the bot's favor; and a venue that demands a captcha at checkout cannot be
+auto-booked — the bot pages you urgently with the link instead. The strategy
+back-test was re-run under SevenRooms hold semantics (see
+`backtests/RESULTS.md`): same ordering, slightly higher take rates, no
+per-provider tuning needed.
+
 ## Notifications
 
 **ntfy** is the fastest to set up: pick an unguessable topic, put it in `.env`,

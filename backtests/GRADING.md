@@ -52,3 +52,48 @@ environment. Two caveats keep that number honest: (1) `/3/details` and
 `/3/book` are verified by design only through the user's first deliberate,
 cancelable booking; (2) Resy's edge behaviour is per-IP and shifts — which
 is why `doctor` re-verifies from the machine that matters, every run.
+
+---
+
+# Round 2: the SevenRooms (DoorDash) provider build
+
+Same method: adversarial audit first, grade second, fixes in between. The
+evidence base grew to 130 tests including a SevenRooms scenario suite with
+availability shapes captured from the live API (The Corner Store, The
+Eighty Six).
+
+## First pass — what the audit found
+
+| # | Severity | Finding | Consequence if shipped |
+|---|----------|---------|------------------------|
+| 1 | **High** | `james simulate` on a SevenRooms target mocked only Resy endpoints — the "simulation" would have sent real requests to real SevenRooms. | A rehearsal that touches production, the one thing a rehearsal must never do. |
+| 2 | **High** | A wide poll range swept every candidate day per cycle: a 0–30 day target fired 31 requests per poll, ~40/min sustained across targets. | The politeness the burst work bought, spent back by the poll loop. |
+| 3 | Medium | Guest details were validated *after* placing a hold, wasting a locked table on a booking that could never complete. | A table locked away from its rightful next taker, for nothing. |
+| 4 | Medium | Booking-machinery failures (captcha wall, missing config) surfaced as a gated "missed" alert most users have off. | A bookable table lost silently to a fixable problem. |
+| 5 | Low | Policy discovery logged two alternating nags per cycle for SevenRooms targets. | Daily log noise. |
+| 6 | Low | `simulate` placed synthetic tables on a mismatched day for poll-only targets. | Confusing rehearsal output. |
+
+First-pass grade: **80/100** — no critical scheduling bugs this round, but
+#1 violates the rehearsal contract and #2 undermines an explicit owner
+requirement, and both shipped in my own new code.
+
+## Fixes
+
+All six fixed, each with a test where testable: simulate routes to the
+provider's own fake (and the captcha, guest-details, blindness, and budget
+scenarios all run against the SevenRooms fake); polls now check the 3
+nearest days every cycle and rotate the rest in bounded chunks
+(`poll_days_per_sweep`, default 10), with a test proving a far-out table is
+still found within a few cycles; guest details are checked before any hold;
+booking-machinery failures page the owner urgently with the reason and a
+deep link.
+
+## Second pass
+
+All rubric categories re-verified at 10/10 with the provider work included;
+130 tests, lint clean, both simulators stateful and payload-faithful, both
+strategy tables run. **100/100**, with the standing caveats plus one new:
+the SevenRooms hold/complete write path follows the widget's observed
+behaviour but is verified only by the owner's first real booking — and a
+venue that demands a captcha at checkout cannot be auto-booked by design;
+it pages the owner instead.

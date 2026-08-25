@@ -99,7 +99,7 @@ async def test_books_a_cancellation_that_appears_between_polls(rig):
         assert sim.booked == []
 
         # Someone cancels a 7:30pm table three weeks out.
-        sim.add(slot_at(21, "19:30"))
+        sim.add(slot_at(2, "19:30"))
 
         booking = await hunter.poll_once(hunter.config.targets[0])
 
@@ -259,7 +259,7 @@ async def test_recovers_from_an_expired_session_without_dying(rig):
 
         # The session goes stale, as it does on a long-running bot.
         sim.expire_session()
-        sim.add(slot_at(21, "19:30"))
+        sim.add(slot_at(2, "19:30"))
 
         generation = hunter._auth_generation
         # The stale session must surface as AuthError specifically. It used to be
@@ -323,7 +323,7 @@ async def test_falls_back_to_a_larger_party_when_the_first_size_is_useless(rig):
 async def test_dry_run_finds_the_table_and_refuses_to_book_it(rig):
     sim = SimResy()
     with sim.mock():
-        sim.add(slot_at(21, "19:30"))
+        sim.add(slot_at(2, "19:30"))
         hunter, notifier = await rig(build_target(), dry_run=True)
         await hunter.login()
         booking = await hunter.poll_once(hunter.config.targets[0])
@@ -338,7 +338,7 @@ async def test_dry_run_finds_the_table_and_refuses_to_book_it(rig):
 async def test_never_books_the_same_target_twice(rig):
     sim = SimResy()
     with sim.mock():
-        sim.add(slot_at(21, "19:30"), slot_at(22, "20:00"))
+        sim.add(slot_at(2, "19:30"), slot_at(3, "20:00"))
         target = build_target(max_bookings=1)
         hunter, _ = await rig(target)
         await hunter.login()
@@ -352,7 +352,9 @@ async def test_never_books_the_same_target_twice(rig):
 async def test_the_global_budget_stops_booking_across_targets(rig):
     sim = SimResy()
     with sim.mock():
-        sim.add(slot_at(21, "19:30"), slot_at(22, "20:00"), slot_at(23, "19:00"))
+        # Days 1 and 2 sit in the always-checked near window; consecutive
+        # polls must book them and then hit the global ceiling.
+        sim.add(slot_at(1, "19:30"), slot_at(2, "20:00"), slot_at(3, "19:00"))
         target = build_target(max_bookings=5)
         hunter, _ = await rig(target, max_bookings_per_run=2)
         await hunter.login()
@@ -366,7 +368,7 @@ async def test_the_global_budget_stops_booking_across_targets(rig):
 async def test_a_booking_survives_a_restart(rig, tmp_path):
     sim = SimResy()
     with sim.mock():
-        sim.add(slot_at(21, "19:30"), slot_at(22, "20:00"))
+        sim.add(slot_at(2, "19:30"), slot_at(3, "20:00"))
         target = build_target(max_bookings=1)
 
         hunter, _ = await rig(target)
@@ -709,3 +711,31 @@ async def _wait_for(predicate, timeout: float):
         await asyncio.sleep(step)
         waited += step
     raise AssertionError("condition never became true")
+
+
+async def test_a_wide_range_is_swept_in_rotating_chunks_not_all_at_once(rig):
+    """Politeness: a 0-30 day target must not fire 31 requests per poll. The
+    sweep checks the nearest days every cycle and rotates the rest, covering
+    the full range over a few cycles."""
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(dates=[], days_ahead_min=0, days_ahead_max=30,
+                              action="notify")
+        hunter, notifier = await rig(target)
+        await hunter.login()
+
+        await hunter.poll_once(target)
+        first_cycle = sim.find_calls
+        assert first_cycle <= target.poll_days_per_sweep, (
+            f"one poll fired {first_cycle} requests"
+        )
+
+        # A table far out in the range is still found within a few cycles.
+        far_day = 25
+        sim.add(slot_at(far_day, "19:30"))
+        for _ in range(6):
+            await hunter.poll_once(target)
+            if notifier.sent:
+                break
+
+    assert notifier.sent, "rotation never reached the far end of the range"

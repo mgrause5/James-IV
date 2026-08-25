@@ -255,3 +255,175 @@ def slot_relative(minutes_from_now: int, *, seating="Dining Room", party=2) -> S
     return SimSlot(
         day=start.date(), start=start, seating_type=seating, party_size=party
     )
+
+
+# ===========================================================================
+# SevenRooms (DoorDash) simulator -- same philosophy as SimResy: a stateful
+# fake of the real endpoints, driven by the payload shapes captured live.
+# ===========================================================================
+
+SR_VENUE_SLUG = "sim-corner-store"
+
+
+@dataclass
+class SRSlot:
+    day: date
+    start: datetime
+    party_size: int = 2
+    taken: bool = False
+    visible_at: float | None = None
+    contested: int = 0
+    # SevenRooms also surfaces non-bookable "request" rows for every time; the
+    # simulator emits them too so the parser's filter is exercised.
+
+    @property
+    def access_id(self) -> str:
+        return f"acc-{self.day}-{self.start:%H%M}-{self.party_size}"
+
+    def visible(self) -> bool:
+        if self.taken:
+            return False
+        return self.visible_at is None or time.monotonic() >= self.visible_at
+
+    def to_time_entry(self) -> dict:
+        return {
+            "type": "book",
+            "time": self.start.strftime("%-I:%M %p"),
+            "time_iso": self.start.strftime("%Y-%m-%d %H:%M:%S"),
+            "access_persistent_id": self.access_id,
+            "shift_category": "DINNER",
+        }
+
+
+def _sr_request_row(day: date, hhmm: str) -> dict:
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=NYC)
+    return {
+        "type": "request",
+        "time": start.strftime("%-I:%M %p"),
+        "time_iso": start.strftime("%Y-%m-%d %H:%M:%S"),
+        "access_persistent_id": None,
+        "is_requestable": True,
+    }
+
+
+@dataclass
+class SimSevenRooms:
+    """Stateful fake SevenRooms. Register with `with sim.mock():`."""
+
+    slots: list[SRSlot] = field(default_factory=list)
+    # Force every availability call to return this status (edge throttling).
+    availability_status_override: int | None = None
+    rate_limit_on_find: int | None = None
+    # Reject completion as venues with captcha do.
+    captcha_on_book: bool = False
+    find_calls: int = 0
+    hold_calls: int = 0
+    book_calls: int = 0
+    booked: list[SRSlot] = field(default_factory=list)
+    holds: dict[str, SRSlot] = field(default_factory=dict)
+    _hold_serial: int = 0
+
+    @property
+    def details_calls(self) -> int:
+        """Alias: a SevenRooms hold plays the role Resy's details call does."""
+        return self.hold_calls
+
+    def add(self, *slots: SRSlot) -> None:
+        self.slots.extend(slots)
+
+    def release_in(self, seconds: float, *slots: SRSlot) -> None:
+        at = time.monotonic() + seconds
+        for slot in slots:
+            slot.visible_at = at
+        self.slots.extend(slots)
+
+    # -------------------------------------------------------------- handlers
+
+    def _handle_availability(self, request: httpx.Request) -> httpx.Response:
+        self.find_calls += 1
+        if self.rate_limit_on_find == self.find_calls:
+            return httpx.Response(429, headers={"Retry-After": "1"})
+        if self.availability_status_override is not None:
+            return httpx.Response(self.availability_status_override)
+
+        params = request.url.params
+        m, d, y = params.get("start_date", "01-01-2000").split("-")
+        day_iso = f"{y}-{m}-{d}"
+        party = int(params.get("party_size", 2))
+
+        times = [
+            s.to_time_entry() for s in self.slots
+            if s.visible() and s.day.isoformat() == day_iso and s.party_size == party
+        ]
+        # Request rows always exist, exactly as observed live.
+        times += [_sr_request_row(date.fromisoformat(day_iso), t) for t in ("17:00", "21:45")]
+
+        return httpx.Response(200, json={
+            "status": 200,
+            "data": {"availability": {day_iso: [{
+                "name": "Dinner", "shift_category": "DINNER", "times": times,
+            }]}},
+        })
+
+    def _slot_by_access(self, access_id: str) -> SRSlot | None:
+        return next((s for s in self.slots if s.access_id == access_id), None)
+
+    def _handle_hold(self, request: httpx.Request) -> httpx.Response:
+        self.hold_calls += 1
+        form = _form(request)
+        slot = self._slot_by_access(form.get("access_persistent_id", ""))
+        if slot is None or slot.taken:
+            return httpx.Response(410)
+        if slot.contested > 0:
+            slot.contested -= 1
+            return httpx.Response(409)
+        # A hold LOCKS the table: mark taken now; completion flips it to booked
+        # (a lapsed hold would free it again, which the sim does not model).
+        slot.taken = True
+        self._hold_serial += 1
+        hold_id = f"hold-{self._hold_serial}"
+        self.holds[hold_id] = slot
+        return httpx.Response(201, json={"data": {"hold_id": hold_id}})
+
+    def _handle_book(self, request: httpx.Request) -> httpx.Response:
+        self.book_calls += 1
+        if self.captcha_on_book:
+            return httpx.Response(400, json={"msg": "captcha required"})
+        form = _form(request)
+        slot = self.holds.get(form.get("hold_id", ""))
+        if slot is None:
+            return httpx.Response(410)
+        self.booked.append(slot)
+        return httpx.Response(201, json={"data": {"reservation_id": f"SR{len(self.booked):04d}"}})
+
+    def _handle_head(self, request: httpx.Request) -> httpx.Response:
+        stamp = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())
+        return httpx.Response(200, headers={"Date": stamp})
+
+    def mock(self):
+        try:
+            import respx
+        except ModuleNotFoundError as exc:  # pragma: no cover
+            raise RuntimeError("The simulator needs respx (pip install respx)") from exc
+        from .sevenrooms import BASE_URL as SR_BASE
+
+        router = respx.mock(assert_all_called=False)
+        router.get(f"{SR_BASE}/api-yoa/availability/widget/range").mock(
+            side_effect=self._handle_availability
+        )
+        router.post(f"{SR_BASE}/api-yoa/reservations/hold").mock(side_effect=self._handle_hold)
+        router.post(f"{SR_BASE}/api-yoa/reservations").mock(side_effect=self._handle_book)
+        router.head(f"{SR_BASE}/").mock(side_effect=self._handle_head)
+        return router
+
+
+def sr_slot_at(days_out: int, hhmm: str, *, party=2, contested=0) -> SRSlot:
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    day = now_nyc().date() + timedelta(days=days_out)
+    return SRSlot(
+        day=day,
+        start=datetime(day.year, day.month, day.day, hour, minute, tzinfo=NYC),
+        party_size=party,
+        contested=contested,
+    )
