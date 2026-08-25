@@ -221,35 +221,54 @@ targets:
   # only acts on real bookable inventory, which appears when tables free up.
   # If a venue demands a captcha at checkout, auto-book fails LOUDLY: your
   # phone gets an urgent alert with the link so you can grab it by hand.
+  # Corner Store drop timing: multiple 2026 guides say ~two weeks out at
+  # 10:00 AM ET "SHARP" (one says 13 days), matching sister venue Or'esh's
+  # official 10am. Not stated on their own site, so days_ahead is the best
+  # sourced value -- the FIRST drop log settles it: "no inventory appeared"
+  # means try days_ahead: 13; "appeared but lost" means the timing is right.
+  # Note their site explicitly warns against bots and back-to-back bookings;
+  # max_bookings: 1 and the 5-request cap keep this bot's footprint small,
+  # but that policy is worth knowing. Tables cap at 4 people; dinner sells
+  # out in seconds.
   - name: The Corner Store
     slug: thecornerstore
     provider: sevenrooms
     party_size: 2
     action: book
     days_ahead_min: 0
-    days_ahead_max: 30
+    days_ahead_max: 15
     earliest: "17:30"
     latest: "21:30"
     preferred_windows:
       - { start: "19:00", end: "20:30" }
+    drop:
+      at: "10:00:00"     # sourced from 2026 guides + sister venue; verify
+      days_ahead: 14     # from the first drop's log (see note above)
     poll_interval_seconds: 60
     max_bookings: 1
-    priority: 7
+    priority: 8
 
+  # The Eighty Six: 2026 guides say 14 days out at 9:00 AM ET (older
+  # "30 days on Resy" reports are stale -- it is not on Resy; verified).
+  # Their site: parties max 4, and multiple/consecutive reservations under
+  # one name may be cancelled -- max_bookings: 1 respects that.
   - name: The Eighty Six
     slug: theeightysix
     provider: sevenrooms
     party_size: 2
     action: book
     days_ahead_min: 0
-    days_ahead_max: 30
+    days_ahead_max: 15
     earliest: "17:30"
     latest: "21:30"
     preferred_windows:
       - { start: "19:00", end: "20:30" }
+    drop:
+      at: "09:00:00"     # sourced from 2026 guides; verify from first drop log
+      days_ahead: 14
     poll_interval_seconds: 60
     max_bookings: 1
-    priority: 7
+    priority: 8
 
   # Or'esh -- The Corner Store's live-fire sister in Soho. The only list
   # entry with a PUBLIC DoorDash drop policy (from oresh.com, Aug 2026):
