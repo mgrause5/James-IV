@@ -6,11 +6,7 @@
 #                           Raoul's, I Sodi, Via Carota, Minetta Tavern,
 #                           Balthazar, Borgo, Lucali
 #   On DoorDash (whose reservations run on SevenRooms), hunted below:
-#                           The Corner Store, The Eighty Six
-#   Still missing:
-#     - O'resh .......... found on neither platform under any spelling tried;
-#                         paste its booking link from the DoorDash app or the
-#                         restaurant's site and the slug in that URL adds it
+#                           The Corner Store, The Eighty Six, Or'esh
 #
 # Every venue id, slug, and drop time below was verified against the live
 # Resy API on 2026-08-25. Drop targets use `auto: true`, so the bot re-reads
@@ -254,6 +250,30 @@ targets:
     poll_interval_seconds: 60
     max_bookings: 1
     priority: 7
+
+  # Or'esh -- The Corner Store's live-fire sister in Soho. The only list
+  # entry with a PUBLIC DoorDash drop policy (from oresh.com, Aug 2026):
+  # "Reservations are available on the DoorDash App 7 days in advance and
+  # are released daily at 10am." So this one snipes. Max party 4; closed
+  # Sundays. Slug verified live: sevenrooms.com/explore/450wbroadway.
+  - name: Or'esh
+    slug: 450wbroadway
+    provider: sevenrooms
+    party_size: 2
+    action: book
+    days_ahead_min: 0
+    days_ahead_max: 7      # only a 7-day window ever exists
+    weekdays: [mon, tue, wed, thu, fri, sat]
+    earliest: "17:30"
+    latest: "21:30"
+    preferred_windows:
+      - { start: "19:00", end: "20:30" }
+    drop:
+      at: "10:00:00"       # stated on oresh.com; discovery is Resy-only so
+      days_ahead: 7        # this is set by hand -- confirm from the first log
+    poll_interval_seconds: 60
+    max_bookings: 1
+    priority: 9
 
   - name: Borgo
     slug: borgo
