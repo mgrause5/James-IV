@@ -20,8 +20,26 @@ esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 DOCKER="docker compose"
 if ! docker compose version >/dev/null 2>&1; then
-  if command -v docker-compose >/dev/null 2>&1; then DOCKER="docker-compose";
-  else fail "Docker is not installed. On DigitalOcean, create the droplet from the Marketplace 'Docker' image."; fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    DOCKER="docker-compose"
+  elif ! command -v docker >/dev/null 2>&1; then
+    # Plain-Ubuntu droplet (Marketplace Docker image not used). Self-heal:
+    # Docker's official install script sets up the engine + compose plugin.
+    warn "Docker isn't installed on this server yet."
+    read -rp "  Install it now? Takes about 2 minutes. [Y/n]: " INST
+    if [ "${INST:-Y}" = "n" ] || [ "${INST:-Y}" = "N" ]; then
+      fail "The bot runs inside Docker. Re-run 'bash setup.sh' when ready to install it."
+    fi
+    curl -fsSL https://get.docker.com | sh || fail "Docker install failed -- paste the lines above to your assistant."
+    systemctl enable --now docker >/dev/null 2>&1 || true
+    docker compose version >/dev/null 2>&1 || fail "Docker installed but 'docker compose' is still unavailable -- try: apt-get install -y docker-compose-plugin"
+    ok "Docker installed"
+  else
+    # Engine present, compose plugin missing (rare) -- fetch just the plugin.
+    apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || true
+    docker compose version >/dev/null 2>&1 || fail "Docker is here but Compose is not -- run: apt-get install -y docker-compose-plugin"
+    ok "Docker Compose plugin installed"
+  fi
 fi
 
 say "James IV setup"
