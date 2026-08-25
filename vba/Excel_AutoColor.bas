@@ -164,7 +164,7 @@ End Sub
 Private Sub ColorFormulaCell(ByVal cell As Range)
     Dim f As String
     f = StripStringLiterals(cell.Formula)
-    If HasExternalRef(f) Then
+    If HasExternalRef(f, cell.Worksheet) Then
         cell.Font.Color = CLR_EXTERNAL
     ElseIf HasOtherSheetRef(f, cell.Worksheet.Name) Then
         cell.Font.Color = CLR_SHEET_LINK
@@ -190,7 +190,7 @@ Private Function StripStringLiterals(ByVal f As String) As String
     StripStringLiterals = out
 End Function
 
-Private Function HasExternalRef(ByVal f As String) As Boolean
+Private Function HasExternalRef(ByVal f As String, ByVal ws As Worksheet) As Boolean
     ' Pass 1: a bracketed file part - [Book1.xlsx]Sheet1!A1 or
     ' 'C:\path\[Book1.xlsx]Sheet name'!A1. Structured table references
     ' (Table1[Amount], [@[Adj. EBITDA]], Table1[[#Totals],[Col]]) also
@@ -212,7 +212,9 @@ Private Function HasExternalRef(ByVal f As String) As Boolean
 
         If pre Like "[A-Za-z0-9_]" Or inner Like "[@#[]*" Then
             ' structured reference - skip it entirely
-        ElseIf InStr(1, inner, ".") > 0 Then
+        ElseIf EndsWithWorkbookExt(inner) Then
+            ' a genuine bracketed file part always names a workbook
+            ' file; a mere dot could be a bare column ref ([Q2.Rev])
             If BangFollowsSheetName(f, closeB + 1) Then
                 HasExternalRef = True
                 Exit Function
@@ -227,7 +229,8 @@ Private Function HasExternalRef(ByVal f As String) As Boolean
     ' source workbook is open, ='C:\Deals\Assumptions.xlsx'!WACC once
     ' it is closed, =SUM(Book2.xlsx!Table1[#All]). The token in front
     ' of each "!" gives it away: path characters and brackets cannot
-    ' appear in a sheet name, and neither can a workbook extension.
+    ' appear in a sheet name, and a workbook-extension ending is
+    ' external unless a local sheet really carries that name.
     Dim p As Long, j As Long, tok As String
     p = InStr(1, f, "!")
     Do While p > 0
@@ -260,11 +263,26 @@ Private Function HasExternalRef(ByVal f As String) As Boolean
             End If
         End If
         If EndsWithWorkbookExt(tok) Then
-            HasExternalRef = True
-            Exit Function
+            ' a SHEET in this workbook can itself be named "Data.csv"
+            ' (CSV imports); Excel resolves that reference to the local
+            ' sheet, so only flag red when no such sheet exists here
+            If Not IsSheetName(ws, tok) Then
+                HasExternalRef = True
+                Exit Function
+            End If
         End If
         p = InStr(p + 1, f, "!")
     Loop
+End Function
+
+Private Function IsSheetName(ByVal ws As Worksheet, ByVal tok As String) As Boolean
+    Dim sh As Object
+    For Each sh In ws.Parent.Sheets
+        If StrComp(sh.Name, tok, vbTextCompare) = 0 Then
+            IsSheetName = True
+            Exit Function
+        End If
+    Next sh
 End Function
 
 ' Position of the "]" that truly closes the "[" at openPos, honoring
@@ -311,8 +329,8 @@ End Function
 Private Function EndsWithWorkbookExt(ByVal tok As String) As Boolean
     tok = LCase$(tok)
     EndsWithWorkbookExt = tok Like "*.xls" Or tok Like "*.xls?" _
-        Or tok Like "*.xlt?" Or tok Like "*.xla" Or tok Like "*.xlam" _
-        Or tok Like "*.csv" Or tok Like "*.ods"
+        Or tok Like "*.xlt" Or tok Like "*.xlt?" Or tok Like "*.xla" _
+        Or tok Like "*.xlam" Or tok Like "*.csv" Or tok Like "*.ods"
 End Function
 
 ' Any "!" that survives after references to the cell's own sheet are

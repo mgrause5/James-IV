@@ -271,18 +271,33 @@ End Sub
 ' groups so a marker grouped with the shape it flags is still found),
 ' then delete them. Deleting while iterating would fight the
 ' collections' re-indexing - and a group dropping to one member can
-' dissolve, invalidating the very GroupItems being walked. Held Shape
-' references stay valid through all that.
+' dissolve, invalidating the very GroupItems being walked. A delete
+' can also orphan a SIBLING reference the same way (two markers
+' grouped together), so each round tolerates dead references and the
+' slide is re-collected until a sweep finds nothing left.
 Private Function RemoveTBUFromSlide(ByVal sld As Slide) As Long
-    Dim doomed As Collection
-    Set doomed = New Collection
-    CollectTBUMarkers sld.Shapes, doomed
+    Dim total As Long, rounds As Long
+    Dim doomed As Collection, shp As Shape, deleted As Long
 
-    Dim shp As Shape
-    For Each shp In doomed
-        shp.Delete
-    Next shp
-    RemoveTBUFromSlide = doomed.Count
+    Do
+        Set doomed = New Collection
+        CollectTBUMarkers sld.Shapes, doomed
+        If doomed.Count = 0 Then Exit Do
+
+        deleted = 0
+        For Each shp In doomed
+            On Error Resume Next
+            shp.Delete
+            If Err.Number = 0 Then deleted = deleted + 1
+            Err.Clear
+            On Error GoTo 0
+        Next shp
+        total = total + deleted
+        If deleted = 0 Then Exit Do   ' nothing deletable - don't spin
+        rounds = rounds + 1
+    Loop While rounds < 10
+
+    RemoveTBUFromSlide = total
 End Function
 
 ' shps is a Shapes or GroupShapes collection.

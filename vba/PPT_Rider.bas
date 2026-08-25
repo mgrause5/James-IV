@@ -68,7 +68,8 @@ Private Sub CopySlideToRider(ByVal removeFromDeck As Boolean)
     riderPath = BuildRiderPath(src)
 
     Dim rider As Presentation
-    Dim openedHere As Boolean, riderWasDirty As Boolean, savedOK As Boolean
+    Dim openedHere As Boolean, createdHere As Boolean
+    Dim riderWasDirty As Boolean, savedOK As Boolean
 
     On Error GoTo Failed
 
@@ -80,6 +81,7 @@ Private Sub CopySlideToRider(ByVal removeFromDeck As Boolean)
         Else
             Set rider = Application.Presentations.Add(msoFalse)
             openedHere = True
+            createdHere = True
             rider.PageSetup.SlideWidth = src.PageSetup.SlideWidth
             rider.PageSetup.SlideHeight = src.PageSetup.SlideHeight
             rider.SaveAs riderPath, ppSaveAsOpenXMLPresentation
@@ -140,19 +142,32 @@ Failed:
     reason = Err.Description
     If savedOK Then
         ' The rider is safely on disk; only the cleanup after it failed.
+        ' Retry the close so a hidden windowless rider can't outlive
+        ' this run (if it already closed, the retry just no-ops).
+        On Error Resume Next
+        If openedHere Then rider.Close
+        On Error GoTo 0
         MsgBox "The slide WAS saved to the rider, but finishing up failed: " & reason & _
                IIf(removeFromDeck, vbCrLf & "Check whether the slide still needs deleting from this deck.", ""), _
                vbExclamation, "Rider"
     Else
-        ' Don't leave an invisible, half-updated rider open in the
-        ' session - it would hold a lock on the file and receive a
-        ' duplicate slide on the next attempt.
         On Error Resume Next
         If openedHere Then
+            ' Don't leave an invisible, half-updated rider open in the
+            ' session - it would hold a lock on the file and receive a
+            ' duplicate slide on the next attempt.
             If Not rider Is Nothing Then
                 rider.Saved = msoTrue   ' discard, so closing never prompts
                 rider.Close
             End If
+            ' A brand-new rider that never got its slide is just an
+            ' empty stray file - remove it again.
+            If createdHere Then Kill riderPath
+        ElseIf Not pasted Is Nothing Then
+            ' The paste landed in the user's open rider but could not
+            ' be saved - take it back out, so their rider returns to
+            ' its pre-macro state and a retry can't duplicate it.
+            pasted.Delete
         End If
         On Error GoTo 0
         MsgBox "Could not update the rider: " & reason & vbCrLf & vbCrLf & _
