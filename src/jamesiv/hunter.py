@@ -582,9 +582,10 @@ class Hunter:
         seen_inventory = False
         handled = False  # a terminal outcome was reported (booked / alerted / dry run)
         request_errors = 0
+        raw_seen = 0  # tables returned for our party size, before our filters
 
         async def worker(worker_id: int) -> None:
-            nonlocal attempts, seen_inventory, handled, request_errors
+            nonlocal attempts, seen_inventory, handled, request_errors, raw_seen
             await asyncio.sleep(worker_id * (drop.burst_interval_ms / 1000.0)
                                 / max(1, drop.burst_concurrency))
             while not stop.is_set() and now_utc() < deadline:
@@ -608,7 +609,16 @@ class Hunter:
                             retries=0,  # the burst loop IS the retry; a backoff
                                         # here would just slow the next attempt
                         )
+                        raw_seen += len(slots)
                         ranked = best_slots(target, slots, now=now_nyc())
+                        # Shot-by-shot tape: five lines per drop, and any failure
+                        # explains itself without a debugging session.
+                        log.info(
+                            "%s: shot %d/%d at +%.2fs -> %d table(s), %d in window",
+                            target.name, attempts, drop.max_requests,
+                            (now_utc() - started).total_seconds(),
+                            len(slots), len(ranked),
+                        )
                         if not ranked:
                             continue
 
@@ -693,6 +703,13 @@ class Hunter:
                     )
                 elif attempts == 0:
                     diagnosis = "the burst never got a request off -- check the logs."
+                elif raw_seen > 0:
+                    diagnosis = (
+                        f"{raw_seen} table(s) for a party of {target.party_size} appeared "
+                        f"during the burst, but none inside your "
+                        f"{target.earliest:%H:%M}-{target.latest:%H:%M} window. Widening "
+                        "earliest/latest in config.yaml would have taken one."
+                    )
                 else:
                     diagnosis = (
                         f"no matching table appeared in {attempts} request(s) over "

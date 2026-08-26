@@ -767,3 +767,32 @@ async def test_a_throttled_drop_reports_rejection_not_emptiness(rig):
     reports = [m for t, m in notifier.sent if "Drop report" in t]
     assert reports, "a fully rejected drop must still reach the phone"
     assert "REJECTED" in reports[0] and "throttled" in reports[0]
+
+
+async def test_tables_outside_the_window_are_diagnosed_not_reported_as_nothing(rig):
+    """'No tables released' and 'tables released but your dinner window excluded
+    them all' demand opposite fixes; the drop report must say which."""
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            earliest="17:30",
+            latest="21:30",
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "lead_ms": 100,
+                "burst_interval_ms": 200,
+                "clock_probes": 2,
+            },
+        )
+        hunter, notifier = await rig(target)
+        await hunter.login()
+        # A real release -- but at 4:45pm, outside the 17:30-21:30 window.
+        sim.release_in(1.0, slot_at(30, "16:45"))
+        booking = await hunter.snipe(target)
+
+    assert booking is None
+    reports = [m for t, m in notifier.sent if "Drop report" in t]
+    assert reports, "an all-filtered drop must still reach the phone"
+    assert "none inside your 17:30-21:30 window" in reports[0], reports[0]
