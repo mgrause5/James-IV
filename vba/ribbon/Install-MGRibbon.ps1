@@ -25,7 +25,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$File = (Resolve-Path -LiteralPath $File).Path
+$File = (Resolve-Path -LiteralPath $File).ProviderPath
 $ext = [System.IO.Path]::GetExtension($File).ToLowerInvariant()
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -38,9 +38,15 @@ if (-not (Test-Path -LiteralPath $xmlSource)) {
     throw "Ribbon XML not found next to this script: $xmlSource"
 }
 
+# Only the FIRST run writes the backup, so .bak always holds the
+# original pre-ribbon file no matter how often the script is re-run.
 $backup = "$File.bak"
-Copy-Item -LiteralPath $File -Destination $backup -Force
-Write-Host "Backup written to $backup"
+if (Test-Path -LiteralPath $backup) {
+    Write-Host "Keeping existing backup $backup (the pre-ribbon original)"
+} else {
+    Copy-Item -LiteralPath $File -Destination $backup
+    Write-Host "Backup written to $backup"
+}
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -64,6 +70,17 @@ try {
     try { $relsText = $reader.ReadToEnd() }
     finally { $reader.Dispose() }
     $relsXml = [xml]$relsText
+
+    # A pre-existing Office-2007-format ribbon (customUI.xml) stays in
+    # the package but stops rendering once a customUI14 part exists -
+    # Office 2010+ loads only the newer part. Say so instead of letting
+    # an older custom tab vanish silently.
+    $legacyType = 'http://schemas.microsoft.com/office/2006/relationships/ui/extensibility'
+    $legacy = @($relsXml.Relationships.Relationship) | Where-Object { $_.Type -eq $legacyType }
+    if ($legacy) {
+        Write-Warning ('This file already carries an Office 2007-format ribbon part (customUI.xml). ' +
+            'Office 2010+ will now load only the MG Macros (customUI14) part, so that older custom tab will stop appearing.')
+    }
 
     $relType = 'http://schemas.microsoft.com/office/2007/relationships/ui/extensibility'
     $already = @($relsXml.Relationships.Relationship) | Where-Object { $_.Type -eq $relType }

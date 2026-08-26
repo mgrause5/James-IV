@@ -41,7 +41,7 @@
         </group>
         <group id="mgTBU" label="TBU">
           <button id="mgTBUAdd" label="TBU Marker" size="large"
-                  imageMso="InsertTextBox" keytip="T"
+                  imageMso="TextBoxInsert" keytip="T"
                   screentip="Drop a pre-formatted TBU flag"
                   supertip="Pinned to the selected shape's top-right corner, or the slide's when nothing is selected."
                   onAction="MG_RibbonAction"/>

@@ -1,6 +1,9 @@
 # VBA macros for Excel and PowerPoint
 
-Three importable modules. Each is self-contained — import only the ones you want.
+Importable VBA modules plus a ribbon kit. The three macro modules are
+self-contained — import only the ones you want. The two `_MGRibbon` modules
+are optional glue for the ribbon tab and shortcuts, and must be imported
+alongside the macro modules they call.
 
 | File | App | What it does |
 | --- | --- | --- |
@@ -162,7 +165,9 @@ You now have the **MG Macros tab** in every workbook, plus real shortcuts:
 **`Ctrl+Shift+A`** (AutoColor selection) and **`Ctrl+Shift+S`** (whole
 sheet), bound automatically when the add-in loads. To change them, edit the
 CONFIG block at the top of `Excel_MGRibbon.bas` (`^`=Ctrl, `+`=Shift,
-`%`=Alt) and re-save the add-in. Keytips work too: `Alt, M G, A`.
+`%`=Alt) and re-save the add-in. Keytips work too: `Alt, G, A` — in Excel
+the tab answers to `G`, because the built-in Formulas tab owns the bare `M`
+keytip and an `M`-starting sequence can never reach a custom tab.
 
 ### PowerPoint: build `MGMacros.ppam`
 
