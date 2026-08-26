@@ -5,7 +5,11 @@
      MG_RibbonAction in PPT_MGRibbon.bas.
      Keyboard: Alt, X opens the tab. Grab Size is a dropdown:
      Alt, X, S opens it, then W grabs the width, H the height,
-     B both. Alt, X, A applies whatever was grabbed. -->
+     B both. Alt, X, A applies whatever was grabbed.
+     Caveat: if a legacy COM add-in makes the built-in Add-ins tab
+     visible, that tab also claims the X keytip and Office reassigns
+     the duplicate - pick another tab letter here if Alt, X ever
+     opens "Add-ins" instead. -->
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
   <ribbon startFromScratch="false">
     <tabs>

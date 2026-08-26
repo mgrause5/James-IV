@@ -187,7 +187,7 @@ keytip and an `M`-starting sequence can never reach a custom tab.
 4. Reopen PowerPoint → File → Options → Add-ins → Manage **PowerPoint
    Add-ins** → Go → Add New… → pick `MGMacros.ppam`.
 
-The tab loads in every session with all eleven buttons. Keyboard access in
+The tab loads in every session with all of its buttons. Keyboard access in
 PowerPoint (which has no `OnKey` API, so no direct Ctrl-combos):
 
 - **Keytips**: `Alt, X` opens the tab, then — `S` opens the Grab Size
@@ -196,6 +196,13 @@ PowerPoint (which has no `OnKey` API, so no direct Ctrl-combos):
   copy/move to rider. So grabbing both dimensions of the shape you're on is
   `Alt, X, S, B`. Every letter is a `keytip="…"` attribute in
   `PPT_MGMacros_customUI14.xml` — change them there and re-run the
+  installer.
+
+  One corporate-machine caveat: when a legacy COM add-in (older Acrobat,
+  MathType and the like) makes PowerPoint's built-in **Add-ins** tab
+  visible, that tab claims the `X` keytip too, and Office auto-reassigns
+  the duplicate. If `Alt, X` ever opens "Add-ins" instead of MG Macros,
+  pick a different tab letter in the XML (e.g. `B` or `Z`) and re-run the
   installer.
 - **QAT numbers**: right-click any MG button → *Add to Quick Access
   Toolbar*; QAT slots answer to `Alt+1` … `Alt+9`.
