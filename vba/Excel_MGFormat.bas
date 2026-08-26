@@ -84,6 +84,20 @@ Public Sub CopyBlackPicture()
     Dim srcSheet As Worksheet, tmp As Worksheet
     Set srcSheet = src.Worksheet
 
+    ' A column-header click or Ctrl+A selects a million rows; clamp to
+    ' the cells actually in use so the copy stays instant.
+    Set src = Intersect(src, srcSheet.UsedRange)
+    If src Is Nothing Then
+        MsgBox "The selection has no used cells to copy.", vbExclamation, "Copy Black"
+        Exit Sub
+    End If
+    If src.Cells.CountLarge > 100000 Then
+        MsgBox "That's " & Format$(src.Cells.CountLarge, "#,##0") & _
+               " cells - too big to photograph sensibly. Select the actual exhibit range.", _
+               vbExclamation, "Copy Black"
+        Exit Sub
+    End If
+
     Dim showGrid As Boolean
     showGrid = ActiveWindow.DisplayGridlines
 

@@ -32,11 +32,11 @@
         </group>
         <group id="mgFormat" label="Format">
           <menu id="mgFormatMenu" label="Format" size="large"
-                imageMso="NumberFormatGeneral" keytip="X"
+                imageMso="NumberFormatGallery" keytip="X"
                 screentip="MG formatting menu"
                 supertip="Alt, X, X opens it; 1 opens the number-format chooser.">
             <menu id="mgNumFmtMenu" label="Number Formats" keytip="1"
-                  imageMso="NumberFormatGeneral"
+                  imageMso="NumberFormatGallery"
                   screentip="One-decimal formats that align at the decimal point">
               <button id="mgFmtNum" label="1&#160;&#160;Number&#160;&#160;100.1"
                       imageMso="CommaStyle" keytip="1"
