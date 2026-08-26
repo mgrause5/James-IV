@@ -7,6 +7,14 @@ Three importable modules. Each is self-contained — import only the ones you wa
 | `Excel_AutoColor.bas` | Excel | Color cell fonts by content type (hardcode / formula / sheet link / external link) |
 | `PPT_ShapeTools.bas` | PowerPoint | Grab & apply shape dimensions, swap two shapes, insert/remove TBU markers |
 | `PPT_Rider.bas` | PowerPoint | Rip the current slide into a `<Deck> - Rider.pptx` scrap file |
+| `Excel_MGRibbon.bas` | Excel | Ribbon-button dispatch + `Ctrl+Shift` keyboard shortcuts |
+| `PPT_MGRibbon.bas` | PowerPoint | Ribbon-button dispatch for the MG Macros tab |
+| `ribbon/…customUI14.xml` | both | The "MG Macros" ribbon tab definitions (buttons, groups, keytips) |
+| `ribbon/Install-MGRibbon.ps1` | both | One-command installer that embeds the tab into your add-in |
+
+Two ways to run them: the quick import below (macros via `Alt+F8`, QAT
+buttons, Excel shortcuts), or the full **MG Macros ribbon tab** — see
+[its own section](#the-mg-macros-ribbon-tab--shortcuts) further down.
 
 ## Importing
 
@@ -129,6 +137,64 @@ Behavior notes:
   silently saves over them: a copy is appended and left unsaved for you, and a
   move is refused until you've saved or discarded — so a ripped slide can
   never exist only in an unsaved file.
+
+## The MG Macros ribbon tab & shortcuts
+
+The `ribbon/` folder turns the macros into a proper **"MG Macros" tab next to
+Home**, with grouped buttons like the built-in tabs, plus keyboard access.
+Office compiles VBA only when *it* saves a file, so there's a one-time
+assembly step per app (~5 minutes); everything else is prebuilt.
+
+### Excel: build `MGMacros.xlam`
+
+1. Open Excel with a blank workbook → `Alt+F11` → File → Import File… →
+   import **both** `Excel_AutoColor.bas` and `Excel_MGRibbon.bas` into the
+   blank workbook's project.
+2. Back in Excel: File → Save As → type **Excel Add-in (*.xlam)** → name it
+   `MGMacros.xlam` (Excel jumps to your AddIns folder — fine). Close Excel.
+3. Embed the tab:
+   `powershell -ExecutionPolicy Bypass -File Install-MGRibbon.ps1 -File "<path>\MGMacros.xlam"`
+   (run from the `ribbon/` folder; it writes a `.bak` backup first).
+4. Reopen Excel → File → Options → Add-ins → Manage **Excel Add-ins** → Go →
+   check **MGMacros** (Browse to it if it isn't listed).
+
+You now have the **MG Macros tab** in every workbook, plus real shortcuts:
+**`Ctrl+Shift+A`** (AutoColor selection) and **`Ctrl+Shift+S`** (whole
+sheet), bound automatically when the add-in loads. To change them, edit the
+CONFIG block at the top of `Excel_MGRibbon.bas` (`^`=Ctrl, `+`=Shift,
+`%`=Alt) and re-save the add-in. Keytips work too: `Alt, M G, A`.
+
+### PowerPoint: build `MGMacros.ppam`
+
+1. Open PowerPoint with a blank presentation → `Alt+F11` → import **all
+   three**: `PPT_ShapeTools.bas`, `PPT_Rider.bas`, `PPT_MGRibbon.bas`.
+2. File → Save As → type **PowerPoint Add-in (*.ppam)** → `MGMacros.ppam`.
+   Also save a copy as `MGMacros.pptm` — that's your editable master for
+   future changes, since a `.ppam` can't be reopened for editing.
+   Close PowerPoint.
+3. Embed the tab:
+   `powershell -ExecutionPolicy Bypass -File Install-MGRibbon.ps1 -File "<path>\MGMacros.ppam"`
+4. Reopen PowerPoint → File → Options → Add-ins → Manage **PowerPoint
+   Add-ins** → Go → Add New… → pick `MGMacros.ppam`.
+
+The tab loads in every session with all eleven buttons. Keyboard access in
+PowerPoint (which has no `OnKey` API, so no direct Ctrl-combos):
+
+- **Keytips**: `Alt, M G`, then the button's letter — `G` grab size,
+  `W`/`H`/`S` apply width/height/both, `P` swap, `T` TBU, `C`/`M`
+  copy/move to rider. Every letter is a `keytip="…"` attribute in
+  `PPT_MGMacros_customUI14.xml` — change them there and re-run the
+  installer.
+- **QAT numbers**: right-click any MG button → *Add to Quick Access
+  Toolbar*; QAT slots answer to `Alt+1` … `Alt+9`.
+
+### Customizing the tab itself
+
+Button labels, order, groups, icons (`imageMso`), tooltips and keytips all
+live in the two `customUI14.xml` files — edit and re-run the installer, which
+replaces the embedded part cleanly. If PowerShell is locked down on your
+machine, the free **Office RibbonX Editor** does the same job: open the
+add-in, Insert → Office 2010+ Custom UI Part, paste the XML, save.
 
 ## Notes
 

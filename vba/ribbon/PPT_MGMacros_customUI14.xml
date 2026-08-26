@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- MG Macros ribbon tab for PowerPoint.
+     Embed this part into MGMacros.ppam (or your .pptm) with
+     Install-MGRibbon.ps1 or the Office RibbonX Editor. Buttons call
+     MG_RibbonAction in PPT_MGRibbon.bas.
+     Keyboard: Alt, M G, then the button keytip
+     (e.g. Alt, M G, G grabs a size; Alt, M G, S applies it). -->
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon startFromScratch="false">
+    <tabs>
+      <tab id="mgTab" label="MG Macros" keytip="MG" insertAfterMso="TabHome">
+        <group id="mgSize" label="Size">
+          <button id="mgGrab" label="Grab Size" size="large"
+                  imageMso="Copy" keytip="G"
+                  screentip="Remember this shape's width and height"
+                  supertip="Select exactly one shape first. The grabbed size lasts until PowerPoint closes and works across presentations."
+                  onAction="MG_RibbonAction"/>
+          <button id="mgApplyW" label="Apply Width" size="normal"
+                  imageMso="SizeToControlWidth" keytip="W"
+                  screentip="Give the grabbed width to the selected shapes"
+                  onAction="MG_RibbonAction"/>
+          <button id="mgApplyH" label="Apply Height" size="normal"
+                  imageMso="SizeToControlHeight" keytip="H"
+                  screentip="Give the grabbed height to the selected shapes"
+                  onAction="MG_RibbonAction"/>
+          <button id="mgApplyS" label="Apply Both" size="normal"
+                  imageMso="SizeToControlHeightAndWidth" keytip="S"
+                  screentip="Give the grabbed width and height to the selected shapes"
+                  onAction="MG_RibbonAction"/>
+        </group>
+        <group id="mgArrange" label="Arrange">
+          <button id="mgSwap" label="Swap Shapes" size="large"
+                  imageMso="ObjectFlipHorizontal" keytip="P"
+                  screentip="Two selected shapes trade places"
+                  supertip="Centers swap, so different-sized shapes stay balanced in each other's spot."
+                  onAction="MG_RibbonAction"/>
+          <button id="mgSwapTL" label="Swap Corners" size="normal"
+                  imageMso="ObjectFlipVertical" keytip="L"
+                  screentip="Two selected shapes trade top-left corners"
+                  onAction="MG_RibbonAction"/>
+        </group>
+        <group id="mgTBU" label="TBU">
+          <button id="mgTBUAdd" label="TBU Marker" size="large"
+                  imageMso="InsertTextBox" keytip="T"
+                  screentip="Drop a pre-formatted TBU flag"
+                  supertip="Pinned to the selected shape's top-right corner, or the slide's when nothing is selected."
+                  onAction="MG_RibbonAction"/>
+          <button id="mgTBUClearSlide" label="Clear Slide" size="normal"
+                  imageMso="Delete" keytip="D"
+                  screentip="Remove every TBU marker on this slide"
+                  onAction="MG_RibbonAction"/>
+          <button id="mgTBUClearDeck" label="Clear Deck" size="normal"
+                  imageMso="Delete" keytip="K"
+                  screentip="Remove every TBU marker in the presentation"
+                  onAction="MG_RibbonAction"/>
+        </group>
+        <group id="mgRider" label="Rider">
+          <button id="mgRiderSend" label="Copy to Rider" size="large"
+                  imageMso="FileSaveAs" keytip="C"
+                  screentip="Copy this slide into the deck's rider file"
+                  supertip="Creates the rider on first use and appends on every use after that."
+                  onAction="MG_RibbonAction"/>
+          <button id="mgRiderMove" label="Move to Rider" size="large"
+                  imageMso="Cut" keytip="M"
+                  screentip="Rip this slide out into the rider"
+                  supertip="The slide is deleted from this deck only after the rider has saved successfully."
+                  onAction="MG_RibbonAction"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>

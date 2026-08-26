@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- MG Macros ribbon tab for Excel.
+     Embed this part into MGMacros.xlam with Install-MGRibbon.ps1
+     (or the Office RibbonX Editor). Buttons call MG_RibbonAction in
+     Excel_MGRibbon.bas, which dispatches on the button id.
+     Keyboard: Alt, M G, then the button keytip - plus the real
+     Ctrl-shortcuts bound in Excel_MGRibbon.bas. -->
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon startFromScratch="false">
+    <tabs>
+      <tab id="mgTab" label="MG Macros" keytip="MG" insertAfterMso="TabHome">
+        <group id="mgAutoColor" label="AutoColor">
+          <button id="mgAutoColorSel" label="AutoColor Selection" size="large"
+                  imageMso="FontColorPicker" keytip="A"
+                  screentip="AutoColor the selected cells"
+                  supertip="Blue hardcodes, black formulas, green links to other sheets, red links to other workbooks. Also bound to Ctrl+Shift+A."
+                  onAction="MG_RibbonAction"/>
+          <button id="mgAutoColorSheet" label="AutoColor Sheet" size="large"
+                  imageMso="SelectAll" keytip="S"
+                  screentip="AutoColor the whole used range of this sheet"
+                  supertip="Same coloring convention, applied to every used cell on the active sheet. Also bound to Ctrl+Shift+S."
+                  onAction="MG_RibbonAction"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>

@@ -1,2 +1,3 @@
 # VBA source files must keep CRLF line endings for the VBA editor import
 vba/*.bas -text
+vba/ribbon/*.ps1 -text
