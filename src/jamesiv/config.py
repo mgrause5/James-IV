@@ -130,9 +130,15 @@ class DropConfig(BaseModel):
     burst_seconds: float = Field(default=10.0, gt=0, le=300)
     burst_concurrency: int = Field(default=1, ge=1, le=10)
     burst_interval_ms: int = Field(default=400, ge=50, le=5000)
-    # If a larger budget is configured, poll hard for this long then decay,
-    # rather than sustaining full cadence for the whole window.
-    aggressive_seconds: float = Field(default=3.0, ge=0.5, le=60)
+    # Shot placement: fire at full cadence for this long, then slow by
+    # decay_factor. With the 5-shot budget the defaults place shots at
+    # ~0s, 0.4s, 0.8s, 2.8s and 4.8s past the boundary: three dense for a
+    # punctual release, two held back for one that lands seconds late.
+    # Back-tested (RESULTS.md round 3): vs the old all-dense shape this
+    # costs ~1 point when releases are punctual and gains ~29 when they
+    # run late -- and the first live morning (nine drops, nine empties,
+    # two platforms) looked exactly like the late world.
+    aggressive_seconds: float = Field(default=1.0, ge=0.5, le=60)
     decay_factor: float = Field(default=5.0, ge=1.0, le=50)
     # Hard ceiling on find requests per burst, across all workers. This is the
     # knob that decides how loud a drop is; everything else shapes timing.

@@ -48,7 +48,9 @@ from jamesiv.timeutil import NYC
 
 RTT_MEAN, RTT_SIGMA, RTT_FLOOR = 0.085, 0.015, 0.050
 CLOCK_ERR_SIGMA = float(os.environ.get("RACE_CLOCK_SIGMA", "0.060"))
-P_LATE_RELEASE, LATE_MIN, LATE_MAX = 0.30, 0.2, 2.0
+P_LATE_RELEASE = float(os.environ.get("RACE_P_LATE", "0.30"))
+LATE_MIN = 0.2
+LATE_MAX = float(os.environ.get("RACE_LATE_MAX", "2.0"))
 P_BOT_CONTESTED = 0.70
 BOT_MEDIAN, BOT_SIGMA = 0.45, 0.6          # lognormal, seconds after visibility
 HUMAN_MEDIAN, HUMAN_SIGMA = 8.0, 0.8
@@ -230,6 +232,11 @@ STRATEGIES = [
      "aggressive_seconds": 2, "decay_factor": 5, "burst_seconds": 12},
     {"name": "100-barrage", "max_requests": 100, "burst_concurrency": 5, "burst_interval_ms": 60,
      "aggressive_seconds": 3, "decay_factor": 4, "burst_seconds": 12},
+    # stretch: same 5 shots, 3 dense then 2 spread -- covers releases that
+    # land seconds late (shots ~0, .4, .8, 2.8, 4.8 relative to boundary)
+    {"name": "5-stretch lead=100", "max_requests": 5, "burst_concurrency": 1,
+     "burst_interval_ms": 400, "aggressive_seconds": 1.0, "decay_factor": 5,
+     "burst_seconds": 8, "lead_ms": 100},
     # the candidate new default: spread shape + minimal lead
     {"name": "5-spread lead=100", "max_requests": 5, "burst_concurrency": 1,
      "burst_interval_ms": 250, "aggressive_seconds": 0.6, "decay_factor": 12,

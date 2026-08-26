@@ -107,3 +107,25 @@ Two conclusions:
    gap that occasionally loses a Resy race. The bot books through the hold
    the instant it sees inventory, which is exactly the right exploitation
    of that mechanic.
+
+---
+
+# Round 3: shot placement after the first live morning
+
+First live morning, 2026-08-25: all nine snipers fired on time at the
+correct dates on both platforms, and all nine found nothing. Too uniform
+for per-restaurant bad luck; consistent with releases landing seconds
+after the advertised minute -- outside the old dense burst's 1.6s window.
+
+Re-raced dense vs stretched placement (same 5-shot budget) in two worlds,
+400 trials each:
+
+| Shape | jitter <= 2s | 60% late, up to 6s |
+|---|---|---|
+| Dense: 0/.4/.8/1.2/1.6s | **94.0%** | 53.0% |
+| Stretch: 0/.4/.8/2.8/4.8s | 93.0% | **82.0%** |
+
+Shipped: the stretch (aggressive_seconds 1.0, decay 5). One point of
+downside in the punctual world buys twenty-nine in the late world the
+live evidence points at. Reproduce the late world with
+`RACE_P_LATE=0.6 RACE_LATE_MAX=6.0 python backtests/race.py ...`.
