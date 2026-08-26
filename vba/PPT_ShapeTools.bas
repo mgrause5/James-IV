@@ -5,10 +5,16 @@ Option Explicit
 '  PPT_ShapeTools
 '  -------------------------------------------------------------------
 '  Size tools (a format-painter for dimensions):
-'    GrabShapeSize   - remember the selected shape's width and height
-'    ApplyWidth      - give the remembered width to the selected shapes
-'    ApplyHeight     - give the remembered height to the selected shapes
-'    ApplySize       - give both dimensions to the selected shapes
+'    GrabShapeWidth  - remember only the selected shape's width
+'    GrabShapeHeight - remember only the selected shape's height
+'    GrabShapeSize   - remember both dimensions
+'    ApplySize       - give the selected shapes whatever was grabbed
+'    ApplyWidth      - give them just the grabbed width
+'    ApplyHeight     - give them just the grabbed height
+'
+'  Each grab REPLACES what is held (grabbing just the width forgets a
+'  previously grabbed height), so Apply always means "apply exactly
+'  what I last grabbed".
 '
 '  Applying a size turns OFF "resize shape to fit text" (autofit) on
 '  the target shapes - autofit would silently snap them straight back
@@ -21,8 +27,10 @@ Option Explicit
 '    SwapShapesTopLeft  - same, but the top-left corners swap instead
 '
 '  TBU tools:
-'    InsertTBUMarker         - drop a pre-formatted "TBU" flag, pinned
-'                              to the selected shape's top-right corner
+'    InsertTBUMarker         - drop a pre-formatted "TBU" flag (1.4" x
+'                              0.4", "TBU" over a "to be updated"
+'                              subtext line, never autofit), pinned to
+'                              the selected shape's top-right corner
 '                              (or the slide's, with nothing selected)
 '    RemoveTBUMarkersOnSlide - clear every marker on the current slide
 '    RemoveTBUMarkersInDeck  - clear every marker in the presentation
@@ -39,10 +47,12 @@ Option Explicit
 
 ' ----------------------------- CONFIG --------------------------------
 Private Const TBU_TEXT As String = "TBU"
+Private Const TBU_SUBTEXT As String = "to be updated"
 Private Const TBU_FONT As String = "Arial"
-Private Const TBU_FONT_SIZE As Single = 12
-Private Const TBU_BOX_W As Single = 42            ' points
-Private Const TBU_BOX_H As Single = 20            ' points
+Private Const TBU_FONT_SIZE As Single = 14        ' the "TBU" line
+Private Const TBU_SUB_SIZE As Single = 10         ' the subtext line
+Private Const TBU_BOX_W As Single = 1.4 * 72      ' 1.4 inches, in points
+Private Const TBU_BOX_H As Single = 0.4 * 72      ' 0.4 inches, in points
 Private Const TBU_FILL As Long = 65535            ' RGB(255, 255, 0) yellow
 Private Const TBU_TEXT_COLOR As Long = 192        ' RGB(192, 0, 0)   dark red
 Private Const TBU_LINE_COLOR As Long = 192        ' RGB(192, 0, 0)   dark red
@@ -52,11 +62,24 @@ Private Const CONFIRM_GRAB As Boolean = False     ' popup after each grab?
 
 Private mGrabbedW As Single
 Private mGrabbedH As Single
-Private mHaveSize As Boolean
+Private mHaveW As Boolean
+Private mHaveH As Boolean
 
 ' ------------------------------ Size ---------------------------------
 
+Public Sub GrabShapeWidth()
+    GrabDims True, False
+End Sub
+
+Public Sub GrabShapeHeight()
+    GrabDims False, True
+End Sub
+
 Public Sub GrabShapeSize()
+    GrabDims True, True
+End Sub
+
+Private Sub GrabDims(ByVal doWidth As Boolean, ByVal doHeight As Boolean)
     Dim shps As ShapeRange
     Set shps = SelectedShapes()
     If shps Is Nothing Then
@@ -69,13 +92,20 @@ Public Sub GrabShapeSize()
         Exit Sub
     End If
 
-    mGrabbedW = shps(1).Width
-    mGrabbedH = shps(1).Height
-    mHaveSize = True
+    ' A new grab replaces the old one entirely.
+    mHaveW = doWidth
+    mHaveH = doHeight
+    If doWidth Then mGrabbedW = shps(1).Width
+    If doHeight Then mGrabbedH = shps(1).Height
 
     If CONFIRM_GRAB Then
-        MsgBox "Grabbed " & Format$(mGrabbedW / 72, "0.00") & """ wide x " & _
-               Format$(mGrabbedH / 72, "0.00") & """ tall.", vbInformation, "Grab size"
+        Dim what As String
+        If doWidth Then what = Format$(mGrabbedW / 72, "0.00") & """ wide"
+        If doHeight Then
+            If Len(what) > 0 Then what = what & " x "
+            what = what & Format$(mGrabbedH / 72, "0.00") & """ tall"
+        End If
+        MsgBox "Grabbed " & what & ".", vbInformation, "Grab size"
     End If
 End Sub
 
@@ -87,13 +117,24 @@ Public Sub ApplyHeight()
     ApplyGrabbed False, True
 End Sub
 
+' Applies whatever was last grabbed - width, height, or both.
 Public Sub ApplySize()
-    ApplyGrabbed True, True
+    If Not (mHaveW Or mHaveH) Then
+        MsgBox "Nothing grabbed yet - use Grab Size on a shape first.", vbExclamation, "Apply size"
+        Exit Sub
+    End If
+    ApplyGrabbed mHaveW, mHaveH
 End Sub
 
 Private Sub ApplyGrabbed(ByVal doWidth As Boolean, ByVal doHeight As Boolean)
-    If Not mHaveSize Then
-        MsgBox "Nothing grabbed yet - run GrabShapeSize on a shape first.", vbExclamation, "Apply size"
+    If doWidth And Not mHaveW Then
+        MsgBox "No width grabbed yet - use Grab Size > Grab Width (or Grab Both) first.", _
+               vbExclamation, "Apply size"
+        Exit Sub
+    End If
+    If doHeight And Not mHaveH Then
+        MsgBox "No height grabbed yet - use Grab Size > Grab Height (or Grab Both) first.", _
+               vbExclamation, "Apply size"
         Exit Sub
     End If
 
@@ -218,19 +259,27 @@ Public Sub InsertTBUMarker()
         .Tags.Add "TBU_MARKER", "1"
         With .TextFrame
             .WordWrap = msoFalse
+            ' Never autofit: the box keeps its configured size exactly,
+            ' no matter what the text does.
             .AutoSize = ppAutoSizeNone
             .MarginLeft = 2
             .MarginRight = 2
-            .MarginTop = 1
-            .MarginBottom = 1
+            .MarginTop = 0
+            .MarginBottom = 0
             With .TextRange
-                .Text = TBU_TEXT
+                .Text = TBU_TEXT & vbCr & TBU_SUBTEXT
                 .ParagraphFormat.Alignment = ppAlignCenter
                 With .Font
                     .Name = TBU_FONT
+                    .Color.RGB = TBU_TEXT_COLOR
+                End With
+                With .Paragraphs(1).Font
                     .Size = TBU_FONT_SIZE
                     .Bold = msoTrue
-                    .Color.RGB = TBU_TEXT_COLOR
+                End With
+                With .Paragraphs(2).Font
+                    .Size = TBU_SUB_SIZE
+                    .Bold = msoFalse
                 End With
             End With
         End With

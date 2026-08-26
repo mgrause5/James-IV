@@ -49,8 +49,9 @@ macro-enabled deck (e.g. `MyMacros.pptm`) that you open when you work:
 
 Quick Access Toolbar buttons (recommended — one click per macro):
 File → Options → **Quick Access Toolbar** → "Choose commands from:
-**Macros**" → add the ones you use (GrabShapeSize, ApplyWidth, ApplyHeight,
-ApplySize, SwapShapes, InsertTBUMarker, SendSlideToRider, …).
+**Macros**" → add the ones you use (GrabShapeSize, GrabShapeWidth,
+GrabShapeHeight, ApplySize, ApplyWidth, ApplyHeight, SwapShapes,
+InsertTBUMarker, SendSlideToRider, …).
 
 > Copy-paste instead of importing? Fine — but don't paste the first line
 > (`Attribute VB_Name = "…"`); it's file metadata, not code, and won't compile
@@ -92,13 +93,15 @@ Details worth knowing:
 
 **Size grabber** — a format-painter for dimensions:
 
-1. Select one shape → run **`GrabShapeSize`** (silent; set
-   `CONFIRM_GRAB = True` in the CONFIG block for a popup).
-2. Select any other shape(s) → run **`ApplyWidth`**, **`ApplyHeight`**, or
-   **`ApplySize`** for both. Aspect-ratio lock is handled automatically, and
-   "resize shape to fit text" (autofit) is turned off on the targets so the
-   applied size actually sticks. The grabbed size survives until you close
-   PowerPoint.
+1. Select one shape → grab what you want: **`GrabShapeWidth`**,
+   **`GrabShapeHeight`**, or **`GrabShapeSize`** for both (silent; set
+   `CONFIRM_GRAB = True` in the CONFIG block for a popup). Each grab
+   replaces the previous one.
+2. Select any other shape(s) → **`ApplySize`** applies exactly what you
+   grabbed; **`ApplyWidth`** / **`ApplyHeight`** cherry-pick one dimension.
+   Aspect-ratio lock is handled automatically, and "resize shape to fit
+   text" (autofit) is turned off on the targets so the applied size actually
+   sticks. The grab survives until you close PowerPoint.
 
 **Swap** — select exactly two shapes:
 
@@ -110,10 +113,12 @@ Details worth knowing:
 
 **TBU marker**:
 
-- **`InsertTBUMarker`** — drops a yellow, red-bordered, bold-red "TBU" text
-  box pinned to the top-right corner of the selected shape (or of the slide
-  when nothing is selected). Repeated markers cascade slightly so they never
-  hide behind each other. Text, font, size and colors are in the CONFIG block.
+- **`InsertTBUMarker`** — drops a yellow, red-bordered 1.4"×0.4" flag with
+  bold-red **TBU** (14pt) over a "to be updated" subtext line (10pt), pinned
+  to the top-right corner of the selected shape (or of the slide when
+  nothing is selected). The box never autofits — it keeps its configured
+  size exactly. Repeated markers cascade slightly so they never hide behind
+  each other. Text, fonts, sizes and colors are in the CONFIG block.
 - **`RemoveTBUMarkersOnSlide`** / **`RemoveTBUMarkersInDeck`** — markers are
   tagged internally, so cleanup removes exactly the ones this macro created —
   including markers you've since grouped with other shapes — and never touches
@@ -185,9 +190,11 @@ keytip and an `M`-starting sequence can never reach a custom tab.
 The tab loads in every session with all eleven buttons. Keyboard access in
 PowerPoint (which has no `OnKey` API, so no direct Ctrl-combos):
 
-- **Keytips**: `Alt, M G`, then the button's letter — `G` grab size,
-  `W`/`H`/`S` apply width/height/both, `P` swap, `T` TBU, `C`/`M`
-  copy/move to rider. Every letter is a `keytip="…"` attribute in
+- **Keytips**: `Alt, X` opens the tab, then — `S` opens the Grab Size
+  chooser (then `W` width, `H` height, `B` both), `A` applies what was
+  grabbed, `W`/`H` apply just the width/height, `P` swap, `T` TBU, `C`/`M`
+  copy/move to rider. So grabbing both dimensions of the shape you're on is
+  `Alt, X, S, B`. Every letter is a `keytip="…"` attribute in
   `PPT_MGMacros_customUI14.xml` — change them there and re-run the
   installer.
 - **QAT numbers**: right-click any MG button → *Add to Quick Access

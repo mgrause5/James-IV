@@ -3,17 +3,32 @@
      Embed this part into MGMacros.ppam (or your .pptm) with
      Install-MGRibbon.ps1 or the Office RibbonX Editor. Buttons call
      MG_RibbonAction in PPT_MGRibbon.bas.
-     Keyboard: Alt, M G, then the button keytip
-     (e.g. Alt, M G, G grabs a size; Alt, M G, S applies it). -->
+     Keyboard: Alt, X opens the tab. Grab Size is a dropdown:
+     Alt, X, S opens it, then W grabs the width, H the height,
+     B both. Alt, X, A applies whatever was grabbed. -->
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
   <ribbon startFromScratch="false">
     <tabs>
-      <tab id="mgTab" label="MG Macros" keytip="MG" insertAfterMso="TabHome">
+      <tab id="mgTab" label="MG Macros" keytip="X" insertAfterMso="TabHome">
         <group id="mgSize" label="Size">
-          <button id="mgGrab" label="Grab Size" size="large"
-                  imageMso="Copy" keytip="G"
-                  screentip="Remember this shape's width and height"
-                  supertip="Select exactly one shape first. The grabbed size lasts until PowerPoint closes and works across presentations."
+          <menu id="mgGrabMenu" label="Grab Size" size="large"
+                imageMso="Copy" keytip="S"
+                screentip="Grab this shape's dimensions"
+                supertip="Opens a chooser: grab the width, the height, or both. Each grab replaces the previous one. Select exactly one shape first.">
+            <button id="mgGrabW" label="Grab Width" imageMso="SizeToControlWidth" keytip="W"
+                    screentip="Remember only this shape's width"
+                    onAction="MG_RibbonAction"/>
+            <button id="mgGrabH" label="Grab Height" imageMso="SizeToControlHeight" keytip="H"
+                    screentip="Remember only this shape's height"
+                    onAction="MG_RibbonAction"/>
+            <button id="mgGrabB" label="Grab Both" imageMso="SizeToControlHeightAndWidth" keytip="B"
+                    screentip="Remember this shape's width and height"
+                    onAction="MG_RibbonAction"/>
+          </menu>
+          <button id="mgApply" label="Apply" size="large"
+                  imageMso="Paste" keytip="A"
+                  screentip="Give the selected shapes whatever was grabbed"
+                  supertip="Applies exactly the dimensions you grabbed - width, height, or both."
                   onAction="MG_RibbonAction"/>
           <button id="mgApplyW" label="Apply Width" size="normal"
                   imageMso="SizeToControlWidth" keytip="W"
@@ -22,10 +37,6 @@
           <button id="mgApplyH" label="Apply Height" size="normal"
                   imageMso="SizeToControlHeight" keytip="H"
                   screentip="Give the grabbed height to the selected shapes"
-                  onAction="MG_RibbonAction"/>
-          <button id="mgApplyS" label="Apply Both" size="normal"
-                  imageMso="SizeToControlHeightAndWidth" keytip="S"
-                  screentip="Give the grabbed width and height to the selected shapes"
                   onAction="MG_RibbonAction"/>
         </group>
         <group id="mgArrange" label="Arrange">

@@ -16,9 +16,10 @@ Option Explicit
 '  OnKey, so there are no direct Ctrl-combinations. What you get
 '  instead, and can fully customize in the XML's keytip attributes:
 '
-'    Alt, M G, <key>    e.g.  Alt, MG, G = Grab Size
-'                             Alt, MG, S = Apply Both
-'                             Alt, MG, T = TBU marker
+'    Alt, X, <key>      e.g.  Alt, X, S = open the Grab Size chooser,
+'                             then W / H / B picks width, height, both
+'                             Alt, X, A = apply what was grabbed
+'                             Alt, X, T = TBU marker
 '
 '  For even shorter chords, add your favorite buttons to the Quick
 '  Access Toolbar - QAT slots answer to Alt+1 through Alt+9.
@@ -30,14 +31,18 @@ Option Explicit
 ' Every button in PPT_MGMacros_customUI14.xml lands here.
 Public Sub MG_RibbonAction(control As IRibbonControl)
     Select Case control.Id
-        Case "mgGrab"
+        Case "mgGrabW"
+            GrabShapeWidth
+        Case "mgGrabH"
+            GrabShapeHeight
+        Case "mgGrabB"
             GrabShapeSize
+        Case "mgApply"
+            ApplySize
         Case "mgApplyW"
             ApplyWidth
         Case "mgApplyH"
             ApplyHeight
-        Case "mgApplyS"
-            ApplySize
         Case "mgSwap"
             SwapShapes
         Case "mgSwapTL"
