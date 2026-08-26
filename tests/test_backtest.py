@@ -796,3 +796,75 @@ async def test_tables_outside_the_window_are_diagnosed_not_reported_as_nothing(r
     reports = [m for t, m in notifier.sent if "Drop report" in t]
     assert reports, "an all-filtered drop must still reach the phone"
     assert "none inside your 17:30-21:30 window" in reports[0], reports[0]
+
+
+# ---------------------------------------------------------------------------
+# Scenario 8: reconnaissance mode -- mapping WHEN a release actually lands.
+# Born from the second live morning: zero tables at every sample of an 8s
+# window, on two platforms, means the release happens outside the window we
+# watch. Recon trades one morning of extra requests for that answer.
+# ---------------------------------------------------------------------------
+
+
+async def test_recon_maps_the_release_and_books_on_sight(rig, monkeypatch):
+    import jamesiv.hunter as hunter_mod
+
+    # Shrink the sampling plan so the test runs in seconds, keeping its shape:
+    # probes before the bell, near it, and after.
+    monkeypatch.setattr(hunter_mod, "RECON_OFFSETS", [-0.6, -0.2, 0.3, 0.9, 1.6, 2.4])
+
+    sim = SimResy()
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": "00:00:00",   # stamped for real below, aligned with the release
+                "recon": True,
+                "clock_probes": 2,
+            },
+        )
+        hunter, notifier = await rig(target)
+        await hunter.login()
+        # Stamp bell and release at the same instant: bell in 2s, tables 0.7s late.
+        target.drop = target.drop.model_copy(
+            update={"at": (now_nyc() + timedelta(seconds=2)).time()}
+        )
+        sim.release_in(2.7, slot_at(30, "19:30"))
+
+        booking = await hunter.snipe(target)
+
+    assert booking is not None, "recon must strike on sight, not just observe"
+    assert len(sim.booked) == 1
+    reports = [m for t, m in notifier.sent if "Recon report" in t]
+    assert reports, "recon must end with a report"
+    assert "BOOKED during recon" in reports[0]
+    # The exact probe that catches it can shift by one under load; what matters
+    # is that recon reports a positive first-seen offset (the release was late).
+    assert "first appeared at +" in reports[0]
+
+
+async def test_recon_with_no_release_says_so_and_reminds_to_disarm(rig, monkeypatch):
+    import jamesiv.hunter as hunter_mod
+    monkeypatch.setattr(hunter_mod, "RECON_OFFSETS", [-0.4, 0.2, 0.7])
+
+    sim = SimResy()   # nothing ever released
+    with sim.mock():
+        target = build_target(
+            weekdays=[],
+            drop={
+                "days_ahead": 30,
+                "at": (now_nyc() + timedelta(seconds=1)).strftime("%H:%M:%S"),
+                "recon": True,
+                "clock_probes": 2,
+            },
+        )
+        hunter, notifier = await rig(target)
+        await hunter.login()
+        booking = await hunter.snipe(target)
+
+    assert booking is None
+    reports = [m for t, m in notifier.sent if "Recon report" in t]
+    assert reports
+    assert "No table for a party of" in reports[0]
+    assert "recon: true" in reports[0], "the report must remind the owner to disarm"

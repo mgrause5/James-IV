@@ -49,6 +49,14 @@ from .timeutil import (
 log = logging.getLogger("jamesiv.hunter")
 
 
+# Recon sampling plan: dense around the advertised bell, sparse in the tails.
+# Module-level so tests can shrink it to sub-second spans.
+RECON_OFFSETS = [
+    -60, -30, -15, -8, -4, -2, -1, -0.3,
+    0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 13, 17, 22, 30, 45, 60, 90, 120,
+]
+
+
 class BookingBudgetExhausted(Exception):
     """The global per-run booking ceiling has been hit. Stop booking, keep alerting."""
 
@@ -547,6 +555,10 @@ class Hunter:
             milliseconds=drop.lead_ms
         )
 
+        if drop.recon:
+            boundary = offset.local_time_for_server_time(drop_instant)
+            return await self._recon(target, venue_id, day, drop, boundary)
+
         wait = (fire_at - now_utc()).total_seconds()
         if wait < -90.0:
             # next_occurrence_nyc keeps lateness within its grace, so this only
@@ -564,6 +576,82 @@ class Hunter:
         await sleep_until(fire_at)
 
         return await self._burst(target, venue_id, day, drop)
+
+    async def _recon(
+        self, target: Target, venue_id: int, day: date, drop, boundary: datetime
+    ) -> Booking | None:
+        """Map the release window instead of racing it: ~26 probes from 60s
+        before the bell to 120s after, denser near the boundary. Logs every
+        sample, books on sight, and ends with a report that says exactly when
+        inventory appeared -- the measurement that lets the normal 5-shot
+        burst be aimed at reality instead of at the advertised minute."""
+        client = self.client_for(target)
+        timeline: list[tuple[float, int, int]] = []
+        first_seen: float | None = None
+        booking: Booking | None = None
+        rejected = 0
+
+        log.warning("RECON %s -- mapping %s release from -60s to +120s",
+                    target.name, day.isoformat())
+        for off in RECON_OFFSETS:
+            await sleep_until(boundary + timedelta(seconds=off))
+            try:
+                slots = await client.find(
+                    venue_id=venue_id, venue_slug=target.slug, day=day.isoformat(),
+                    party_size=target.party_size, throttle=False, retries=0,
+                )
+            except RateLimited as exc:
+                await asyncio.sleep(exc.retry_after)
+                continue
+            except AuthError:
+                raise
+            except ResyError:
+                rejected += 1
+                timeline.append((off, -1, -1))
+                log.warning("RECON %s %+7.1fs: request rejected", target.name, off)
+                continue
+
+            ranked = best_slots(target, slots, now=now_nyc())
+            timeline.append((off, len(slots), len(ranked)))
+            log.warning("RECON %s %+7.1fs: %d table(s), %d in window",
+                        target.name, off, len(slots), len(ranked))
+
+            if ranked:
+                if first_seen is None:
+                    first_seen = off
+                if booking is None and target.action == "book":
+                    if self.config.settings.dry_run:
+                        await self.alert_slots(target, ranked[:1], dry_run=True)
+                    else:
+                        booking = await self.try_book(target, ranked)
+                        if booking is not None:
+                            break
+
+        seen_pts = [f"{off:+.0f}s:{n}" for off, n, _ in timeline if n > 0]
+        if booking is not None:
+            summary = (f"BOOKED during recon. Tables first appeared at "
+                       f"{first_seen:+.1f}s. Sightings: {' '.join(seen_pts)}")
+        elif first_seen is not None:
+            summary = (f"Tables first appeared at {first_seen:+.1f}s relative to the bell "
+                       f"and were gone before we could take one. Sightings: "
+                       f"{' '.join(seen_pts)}. Re-aim the burst at that moment.")
+        elif rejected == len(timeline) and timeline:
+            summary = "Every probe was rejected -- the address is throttled again."
+        else:
+            summary = (f"No table for a party of {target.party_size} appeared at any of "
+                       f"{len(timeline)} probes from -60s to +120s. Either none were "
+                       "released today, or the release happens entirely outside this "
+                       "span. Worth one recon at party_size 2 for comparison.")
+        log.warning("RECON %s complete: %s", target.name, summary)
+        self.store.log_event("recon", summary, target.name)
+        await self.notifier.send(
+            f"Recon report: {target.name}",
+            f"{day:%a %b %-d}. {summary}\nRemove 'recon: true' from config.yaml "
+            "once you've read this -- it repeats daily until removed.",
+            priority=PRIORITY_HIGH,
+            tags=["mag"],
+        )
+        return booking
 
     async def _burst(self, target: Target, venue_id: int, day: date, drop) -> Booking | None:
         """Hammer `find` for a bounded window, booking the first acceptable slot.

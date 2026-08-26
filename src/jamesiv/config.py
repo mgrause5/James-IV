@@ -146,6 +146,14 @@ class DropConfig(BaseModel):
     # HEAD probes used to measure clock skew before firing. These are cheap
     # metadata requests a minute before the drop, not availability polling.
     clock_probes: int = Field(default=8, ge=2, le=40)
+    # RECONNAISSANCE MODE -- a deliberate, temporary exception to the request
+    # budget. When true, the next drop replaces the 5-shot burst with ~26
+    # probes mapping the whole release window (60s before the bell to 120s
+    # after), reporting exactly when tables appear and vanish -- and booking
+    # on sight if any match. Use on ONE venue for ONE morning to learn its
+    # true release timing, then REMOVE the flag and re-aim the normal burst.
+    # It applies to every drop until removed, and the report reminds you.
+    recon: bool = False
 
     @field_validator("at", mode="before")
     @classmethod
