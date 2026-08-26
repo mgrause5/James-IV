@@ -5,9 +5,14 @@ Option Explicit
 '  Excel_MGRibbon
 '  -------------------------------------------------------------------
 '  Glue for the "MG Macros" ribbon tab and the keyboard shortcuts.
-'  Import this ALONGSIDE Excel_AutoColor.bas into the same project
-'  (ideally MGMacros.xlam - see vba/README.md), then embed
-'  ribbon/Excel_MGMacros_customUI14.xml with Install-MGRibbon.ps1.
+'  Import this ALONGSIDE Excel_AutoColor.bas AND Excel_MGFormat.bas
+'  into the same project (ideally MGMacros.xlam - see vba/README.md),
+'  then embed ribbon/Excel_MGMacros_customUI14.xml with
+'  Install-MGRibbon.ps1.
+'
+'  Keytips (Alt, X opens the tab): D R colors the selection, S the
+'  sheet; X then 1 opens the number-format chooser (1 number,
+'  2 currency, 3 percent, 4 multiple); B is Copy Black.
 '
 '  MG_RibbonAction is the single callback every ribbon button points
 '  at; it dispatches on the button id from the XML.
@@ -30,6 +35,16 @@ Public Sub MG_RibbonAction(control As IRibbonControl)
             AutoColorSelection
         Case "mgAutoColorSheet"
             AutoColorActiveSheet
+        Case "mgFmtNum"
+            FormatNumberOneDecimal
+        Case "mgFmtCur"
+            FormatCurrencyOneDecimal
+        Case "mgFmtPct"
+            FormatPercentOneDecimal
+        Case "mgFmtMult"
+            FormatMultipleOneDecimal
+        Case "mgCopyBlack"
+            CopyBlackPicture
         Case Else
             MsgBox "No macro wired up for ribbon button '" & control.Id & "'.", _
                    vbExclamation, "MG Macros"

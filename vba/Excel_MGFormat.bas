@@ -1,0 +1,143 @@
+Attribute VB_Name = "Excel_MGFormat"
+Option Explicit
+
+' =====================================================================
+'  Excel_MGFormat
+'  -------------------------------------------------------------------
+'  Number formats that stay decimal-aligned when mixed in one column,
+'  plus Copy Black for external outputs. Wired to the MG Macros tab's
+'  Format menu (Alt, X, X, 1, then 1-4) and Copy Black button
+'  (Alt, X, B) via Excel_MGRibbon.bas.
+'
+'    FormatNumberOneDecimal     100.1
+'    FormatCurrencyOneDecimal   $100.1
+'    FormatPercentOneDecimal    12.3%
+'    FormatMultipleOneDecimal   2.4x
+'
+'  Alignment trick: every format reserves the same trailing width -
+'  the actual suffix it shows plus invisible padding the exact width
+'  of the suffixes it doesn't ("_x" pads the width of an x, "_%" the
+'  width of a %). So 100.1 / $8.2 / 12.3% / 2.4x all line up
+'  digit-for-digit at the decimal, suffixes hanging off the right.
+'
+'    CopyBlackPicture - copies the selected range to the clipboard as
+'    a picture with ALL text black, so a green/blue-coded sheet can go
+'    into an external page without shipping the color code. The
+'    original sheet is untouched (the recolor happens on a throwaway
+'    copy). Cell contents only - embedded charts aren't included, and
+'    colors applied by conditional formatting stay as they are.
+' =====================================================================
+
+' ----------------------------- CONFIG --------------------------------
+Private Const FMT_NUMBER As String = "#,##0.0_x_%"
+Private Const FMT_CURRENCY As String = "$#,##0.0_x_%"
+Private Const FMT_PERCENT As String = "#,##0.0%_x"
+Private Const FMT_MULTIPLE As String = "#,##0.0""x""_%"
+' ---------------------------------------------------------------------
+
+Public Sub FormatNumberOneDecimal()
+    ApplyNumberFormat FMT_NUMBER
+End Sub
+
+Public Sub FormatCurrencyOneDecimal()
+    ApplyNumberFormat FMT_CURRENCY
+End Sub
+
+Public Sub FormatPercentOneDecimal()
+    ApplyNumberFormat FMT_PERCENT
+End Sub
+
+Public Sub FormatMultipleOneDecimal()
+    ApplyNumberFormat FMT_MULTIPLE
+End Sub
+
+Private Sub ApplyNumberFormat(ByVal fmt As String)
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Select some cells first.", vbExclamation, "MG Format"
+        Exit Sub
+    End If
+    On Error GoTo Failed
+    Selection.NumberFormat = fmt
+    Exit Sub
+Failed:
+    MsgBox "Could not apply the format - if the sheet is protected, unprotect it and try again.", _
+           vbExclamation, "MG Format"
+End Sub
+
+' Copies the selection as a picture whose text is entirely black. The
+' selection is duplicated onto a throwaway sheet (values, formats,
+' column widths, row heights), recolored there, photographed, and the
+' throwaway sheet deleted - the real sheet is never modified.
+Public Sub CopyBlackPicture()
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Select the range you want to copy.", vbExclamation, "Copy Black"
+        Exit Sub
+    End If
+    Dim src As Range
+    Set src = Selection
+    If src.Areas.Count > 1 Then
+        MsgBox "Select one contiguous range - a multi-area selection can't be copied as a picture.", _
+               vbExclamation, "Copy Black"
+        Exit Sub
+    End If
+
+    Dim srcSheet As Worksheet, tmp As Worksheet
+    Set srcSheet = src.Worksheet
+
+    Dim showGrid As Boolean
+    showGrid = ActiveWindow.DisplayGridlines
+
+    Dim oldScreen As Boolean
+    oldScreen = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    On Error GoTo Failed
+
+    Set tmp = srcSheet.Parent.Worksheets.Add(After:=srcSheet.Parent.Sheets(srcSheet.Parent.Sheets.Count))
+
+    src.Copy
+    With tmp.Range("A1")
+        .PasteSpecial xlPasteColumnWidths
+        .PasteSpecial xlPasteValuesAndNumberFormats
+        .PasteSpecial xlPasteFormats
+    End With
+    Application.CutCopyMode = False
+
+    Dim pasted As Range
+    Set pasted = tmp.Range("A1").Resize(src.Rows.Count, src.Columns.Count)
+
+    ' PasteSpecial carries column widths but not row heights
+    Dim r As Long
+    For r = 1 To src.Rows.Count
+        tmp.Rows(r).RowHeight = src.Rows(r).RowHeight
+    Next r
+
+    pasted.Font.Color = vbBlack
+
+    tmp.Activate
+    ActiveWindow.DisplayGridlines = showGrid
+    pasted.CopyPicture Appearance:=xlScreen, Format:=xlPicture
+
+    srcSheet.Activate
+    tmp.Delete
+    Set tmp = Nothing
+
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = oldScreen
+    MsgBox "A black-text picture of the selection is on the clipboard - paste it with Ctrl+V.", _
+           vbInformation, "Copy Black"
+    Exit Sub
+
+Failed:
+    Dim reason As String
+    reason = Err.Description
+    On Error Resume Next
+    If Not tmp Is Nothing Then
+        srcSheet.Activate
+        tmp.Delete
+    End If
+    On Error GoTo 0
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = oldScreen
+    MsgBox "Copy Black failed: " & reason, vbExclamation, "Copy Black"
+End Sub

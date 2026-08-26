@@ -2,25 +2,66 @@
 <!-- MG Macros ribbon tab for Excel.
      Embed this part into MGMacros.xlam with Install-MGRibbon.ps1
      (or the Office RibbonX Editor). Buttons call MG_RibbonAction in
-     Excel_MGRibbon.bas, which dispatches on the button id.
-     Keyboard: Alt, G, then the button keytip - the tab answers to G
-     because Excel's built-in Formulas tab owns the bare M keytip, so
-     an M-starting sequence can never reach a custom tab. Real
-     Ctrl-shortcuts are bound in Excel_MGRibbon.bas. -->
+     Excel_MGRibbon.bas; the format and Copy Black macros live in
+     Excel_MGFormat.bas - import all three modules together.
+     Keyboard: Alt, X opens the tab. Then:
+       D R   AutoColor the selection (also Ctrl+Shift+A)
+       S     AutoColor the whole sheet (also Ctrl+Shift+S)
+       X, 1  number-format chooser: 1 number, 2 currency, 3 percent,
+             4 multiple - all one decimal, all decimal-aligned
+       B     Copy Black - picture of the selection with all text black
+     Caveat: if a legacy COM add-in makes the built-in Add-ins tab
+     visible, that tab also claims the X keytip and Office reassigns
+     the duplicate - pick another tab letter here if Alt, X ever
+     opens "Add-ins" instead. -->
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
   <ribbon startFromScratch="false">
     <tabs>
-      <tab id="mgTab" label="MG Macros" keytip="G" insertAfterMso="TabHome">
+      <tab id="mgTab" label="MG Macros" keytip="X" insertAfterMso="TabHome">
         <group id="mgAutoColor" label="AutoColor">
           <button id="mgAutoColorSel" label="AutoColor Selection" size="large"
-                  imageMso="FontColorPicker" keytip="A"
+                  imageMso="FontColorPicker" keytip="DR"
                   screentip="AutoColor the selected cells"
-                  supertip="Blue hardcodes, black formulas, green links to other sheets, red links to other workbooks. Also bound to Ctrl+Shift+A, or Alt, G, A."
+                  supertip="Blue hardcodes, black formulas, green links to other sheets, red links to other workbooks. Also bound to Ctrl+Shift+A, or Alt, X, D R."
                   onAction="MG_RibbonAction"/>
           <button id="mgAutoColorSheet" label="AutoColor Sheet" size="large"
                   imageMso="SelectAll" keytip="S"
                   screentip="AutoColor the whole used range of this sheet"
-                  supertip="Same coloring convention, applied to every used cell on the active sheet. Also bound to Ctrl+Shift+S, or Alt, G, S."
+                  supertip="Same coloring convention, applied to every used cell on the active sheet. Also bound to Ctrl+Shift+S."
+                  onAction="MG_RibbonAction"/>
+        </group>
+        <group id="mgFormat" label="Format">
+          <menu id="mgFormatMenu" label="Format" size="large"
+                imageMso="NumberFormatGeneral" keytip="X"
+                screentip="MG formatting menu"
+                supertip="Alt, X, X opens it; 1 opens the number-format chooser.">
+            <menu id="mgNumFmtMenu" label="Number Formats" keytip="1"
+                  imageMso="NumberFormatGeneral"
+                  screentip="One-decimal formats that align at the decimal point">
+              <button id="mgFmtNum" label="1&#160;&#160;Number&#160;&#160;100.1"
+                      imageMso="CommaStyle" keytip="1"
+                      screentip="Number, one decimal, decimal-aligned"
+                      onAction="MG_RibbonAction"/>
+              <button id="mgFmtCur" label="2&#160;&#160;Currency&#160;&#160;$100.1"
+                      imageMso="AccountingFormat" keytip="2"
+                      screentip="Currency, one decimal, decimal-aligned"
+                      onAction="MG_RibbonAction"/>
+              <button id="mgFmtPct" label="3&#160;&#160;Percent&#160;&#160;12.3%"
+                      imageMso="PercentStyle" keytip="3"
+                      screentip="Percent, one decimal, decimal-aligned"
+                      onAction="MG_RibbonAction"/>
+              <button id="mgFmtMult" label="4&#160;&#160;Multiple&#160;&#160;2.4x"
+                      imageMso="Superscript" keytip="4"
+                      screentip="Multiple (0.0x), one decimal, decimal-aligned"
+                      onAction="MG_RibbonAction"/>
+            </menu>
+          </menu>
+        </group>
+        <group id="mgOutput" label="Output">
+          <button id="mgCopyBlack" label="Copy Black" size="large"
+                  imageMso="Camera" keytip="B"
+                  screentip="Copy the selection as an all-black picture"
+                  supertip="Puts a picture of the selected range on the clipboard with every font black, so a color-coded sheet can go into external pages. The sheet itself is untouched."
                   onAction="MG_RibbonAction"/>
         </group>
       </tab>

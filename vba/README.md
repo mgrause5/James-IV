@@ -8,6 +8,7 @@ alongside the macro modules they call.
 | File | App | What it does |
 | --- | --- | --- |
 | `Excel_AutoColor.bas` | Excel | Color cell fonts by content type (hardcode / formula / sheet link / external link) |
+| `Excel_MGFormat.bas` | Excel | Decimal-aligned one-decimal number formats + Copy Black picture export |
 | `PPT_ShapeTools.bas` | PowerPoint | Grab & apply shape dimensions, swap two shapes, insert/remove TBU markers |
 | `PPT_Rider.bas` | PowerPoint | Rip the current slide into a `<Deck> - Rider.pptx` scrap file |
 | `Excel_MGRibbon.bas` | Excel | Ribbon-button dispatch + `Ctrl+Shift` keyboard shortcuts |
@@ -89,6 +90,20 @@ Details worth knowing:
   bracket-free external links (`=Assumptions.xlsx!WACC`,
   `='C:\Deals\Assumptions.xlsx'!WACC`) all classify correctly.
 
+### Excel_MGFormat
+
+- **`FormatNumberOneDecimal` / `FormatCurrencyOneDecimal` /
+  `FormatPercentOneDecimal` / `FormatMultipleOneDecimal`** — one-decimal
+  formats (`100.1`, `$100.1`, `12.3%`, `2.4x`) built to align at the
+  decimal point when mixed in one column: each format shows its own suffix
+  and pads invisibly for the suffixes it doesn't (`_x` / `_%` padding), so
+  every digit lines up and the `x`/`%` hang off the right.
+- **`CopyBlackPicture`** — copies the selected range to the clipboard as a
+  picture with all text black (for external outputs from color-coded
+  sheets). Works on a throwaway duplicate, so the real sheet keeps its
+  colors. Cell contents only; conditional-formatting colors are preserved
+  as-is.
+
 ### PPT_ShapeTools
 
 **Size grabber** — a format-painter for dimensions:
@@ -156,8 +171,8 @@ assembly step per app (~5 minutes); everything else is prebuilt.
 ### Excel: build `MGMacros.xlam`
 
 1. Open Excel with a blank workbook → `Alt+F11` → File → Import File… →
-   import **both** `Excel_AutoColor.bas` and `Excel_MGRibbon.bas` into the
-   blank workbook's project.
+   import **all three**: `Excel_AutoColor.bas`, `Excel_MGFormat.bas`, and
+   `Excel_MGRibbon.bas` into the blank workbook's project.
 2. Back in Excel: File → Save As → type **Excel Add-in (*.xlam)** → name it
    `MGMacros.xlam` (Excel jumps to your AddIns folder — fine). Close Excel.
 3. Embed the tab:
@@ -170,9 +185,25 @@ You now have the **MG Macros tab** in every workbook, plus real shortcuts:
 **`Ctrl+Shift+A`** (AutoColor selection) and **`Ctrl+Shift+S`** (whole
 sheet), bound automatically when the add-in loads. To change them, edit the
 CONFIG block at the top of `Excel_MGRibbon.bas` (`^`=Ctrl, `+`=Shift,
-`%`=Alt) and re-save the add-in. Keytips work too: `Alt, G, A` — in Excel
-the tab answers to `G`, because the built-in Formulas tab owns the bare `M`
-keytip and an `M`-starting sequence can never reach a custom tab.
+`%`=Alt) and re-save the add-in.
+
+Keytips (`Alt, X` opens the tab; the same legacy Add-ins caveat as
+PowerPoint below applies):
+
+- `D R` — AutoColor the selection (works on a few cells or a whole
+  highlighted sheet: whatever is selected gets the convention colors)
+- `S` — AutoColor the entire sheet's used range
+- `X`, then `1` — the number-format chooser: `1` number, `2` currency,
+  `3` percent, `4` multiple. So `Alt, X, X, 1, 3` formats the selection as
+  one-decimal percent. All four formats reserve the same trailing width, so
+  `100.1`, `$8.2`, `12.3%` and `2.4x` align digit-for-digit at the decimal
+  when mixed in a column, suffixes hanging off the right. The format
+  strings live in the CONFIG block of `Excel_MGFormat.bas`.
+- `B` — **Copy Black**: puts a picture of the selected range on the
+  clipboard with every font black, so a green/blue color-coded sheet can go
+  into external pages. The sheet itself is untouched (the recolor happens on
+  a throwaway copy). Cell contents only — embedded charts aren't included,
+  and conditional-formatting colors stay as they are.
 
 ### PowerPoint: build `MGMacros.ppam`
 
