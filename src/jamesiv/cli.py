@@ -7,6 +7,7 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
+import httpx
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
@@ -29,6 +30,22 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+_IP_SERVICES = ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com")
+
+
+async def _exit_ip(proxy: str | None) -> str | None:
+    """The public IP requests leave from, optionally through a proxy. Tries a
+    few echo services so one being down cannot fake a proxy failure."""
+    for url in _IP_SERVICES:
+        try:
+            async with httpx.AsyncClient(proxy=proxy, timeout=20) as c:
+                ip = (await c.get(url)).text.strip()
+            if ip and len(ip) <= 45:  # sanity: an IP, not an error page
+                return ip
+        except Exception:
+            continue
+    return None
 
 DEFAULT_CONFIG = "config.yaml"
 
@@ -642,6 +659,53 @@ def doctor(
 
     async def _probe(hunter: Hunter):
         nonlocal problems
+
+        console.print("\n[bold]Network[/]")
+        if config.settings.aggressive_polling and not secrets.has_proxy:
+            console.print(
+                "  [red]danger[/] aggressive_polling is ON but no proxy is set -- this "
+                "fires many requests per drop from a bare datacenter IP, the fastest way "
+                "to get your account banned. Set PROXY_URL, or turn aggressive_polling off."
+            )
+            problems += 1
+        if secrets.has_proxy:
+            import re
+            masked = re.sub(r"://[^@/]*@", "://", secrets.proxy_url)
+            console.print(f"  proxy configured: {masked}")
+            direct_ip = await _exit_ip(None)
+            proxy_ip = await _exit_ip(secrets.proxy_url)
+            if proxy_ip is None:
+                console.print(
+                    "  [red]fail[/] proxy is set but no request through it succeeded. "
+                    "Check the PROXY_URL in .env (host/port/user/password), and that "
+                    "the proxy plan is active."
+                )
+                problems += 1
+            else:
+                if direct_ip and proxy_ip == direct_ip:
+                    console.print(
+                        f"  [red]fail[/] requests are NOT going through the proxy -- the "
+                        f"exit IP ({proxy_ip}) is this server's own address. Traffic is "
+                        "direct, so Resy will throttle it."
+                    )
+                    problems += 1
+                else:
+                    tail = f" (server is {direct_ip})" if direct_ip else ""
+                    console.print(
+                        f"  [green]ok[/] requests exit through the proxy as {proxy_ip}{tail}"
+                    )
+                    if config.settings.aggressive_polling:
+                        console.print(
+                            f"  [green]ok[/] aggressive polling armed "
+                            f"({config.settings.aggressive_max_requests} shots @ "
+                            f"{config.settings.aggressive_interval_ms}ms)"
+                        )
+        else:
+            console.print(
+                "  [dim]direct[/] no proxy set -- running on the datacenter IP, which "
+                "Resy throttles. Set PROXY_URL in .env for real drops."
+            )
+
         console.print("\n[bold]Resy session[/]")
         try:
             await hunter.login()

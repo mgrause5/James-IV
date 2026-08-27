@@ -75,3 +75,29 @@ class TestProxyWiring:
     def test_has_proxy_reflects_the_secret(self):
         assert Secrets(proxy_url="http://x").has_proxy is True
         assert Secrets(proxy_url="").has_proxy is False
+
+
+class TestProxyIsInRequestPath:
+    """The kwarg must actually route traffic, not just be accepted. A dead
+    proxy has to break the request -- otherwise 'proxy set' is a lie and the
+    bot would run direct on the throttled datacenter IP."""
+
+    async def test_dead_proxy_blocks_resy_requests(self):
+        import httpx
+        c = ResyClient(rate=99, burst=99, proxy="http://127.0.0.1:1")
+        try:
+            with pytest.raises((httpx.ConnectError, httpx.ProxyError, httpx.TransportError)):
+                await c.http.get("https://api.ipify.org", timeout=5)
+        finally:
+            await c.aclose()
+
+    async def test_dead_proxy_blocks_sevenrooms_requests(self):
+        import httpx
+
+        from jamesiv.sevenrooms import SevenRoomsClient
+        c = SevenRoomsClient(rate=99, burst=99, proxy="http://127.0.0.1:1")
+        try:
+            with pytest.raises((httpx.ConnectError, httpx.ProxyError, httpx.TransportError)):
+                await c.http.get("https://api.ipify.org", timeout=5)
+        finally:
+            await c.aclose()
