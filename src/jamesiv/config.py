@@ -58,6 +58,13 @@ class Secrets(BaseSettings):
     guest_phone: str = ""
     guest_email: str = ""
 
+    # Residential-proxy URL for every provider request, e.g.
+    #   http://user:pass@gate.provider.com:7000
+    # Routes traffic through a residential address so Resy's edge does not
+    # throttle it the way it throttles datacenter IPs. This is the single
+    # setting that makes aggressive polling viable. Read from PROXY_URL.
+    proxy_url: str = ""
+
     def guest_info(self) -> dict[str, str]:
         return {
             "first_name": self.guest_first_name,
@@ -73,6 +80,10 @@ class Secrets(BaseSettings):
     @property
     def has_notifier(self) -> bool:
         return bool(self.ntfy_topic) or bool(self.pushover_token and self.pushover_user)
+
+    @property
+    def has_proxy(self) -> bool:
+        return bool(self.proxy_url)
 
 
 class TimeWindow(BaseModel):
@@ -299,6 +310,18 @@ class Settings(BaseModel):
     # request failed outright -- the "bot is blind" alarm.
     blind_poll_alert_after: int = Field(default=8, ge=1)
     notify_on_miss: bool = False
+
+    # Aggressive polling: when a residential proxy is configured, the drop
+    # burst abandons the 5-shot politeness cap (a workaround for datacenter-IP
+    # throttling that no longer applies behind a proxy) and polls hard at the
+    # release, the way the bots that actually win do -- ~10 requests/second
+    # for a few seconds. Off by default and IGNORED without a proxy: firing
+    # this volume from a bare datacenter IP is how an account gets banned
+    # fast. doctor warns loudly if this is on with no proxy.
+    aggressive_polling: bool = False
+    aggressive_max_requests: int = Field(default=40, ge=5, le=300)
+    aggressive_interval_ms: int = Field(default=120, ge=50, le=1000)
+    aggressive_seconds: float = Field(default=8.0, gt=0, le=60)
 
 
 class Config(BaseModel):

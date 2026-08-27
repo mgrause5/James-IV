@@ -432,6 +432,28 @@ class Hunter:
             jitter = base * target.poll_jitter
             await asyncio.sleep(max(5.0, random.uniform(base - jitter, base + jitter)))
 
+    def _effective_drop(self, drop):
+        """The drop config actually used for a burst.
+
+        With a residential proxy configured and aggressive_polling on, the
+        5-shot politeness cap is lifted for real release-time polling -- the
+        cap only ever existed to survive datacenter-IP throttling, which the
+        proxy removes. Recon always wins over aggressive (you are measuring,
+        not racing). Without a proxy the config is returned untouched, so a
+        stray aggressive_polling flag on a bare IP changes nothing.
+        """
+        s = self.config.settings
+        if drop is None or drop.recon or not s.aggressive_polling:
+            return drop
+        if not self.secrets.has_proxy:
+            return drop
+        return drop.model_copy(update={
+            "max_requests": s.aggressive_max_requests,
+            "burst_interval_ms": s.aggressive_interval_ms,
+            "burst_seconds": s.aggressive_seconds,
+            "aggressive_seconds": s.aggressive_seconds,  # no cadence decay
+        })
+
     # ---------------------------------------------------------- drop discovery
 
     async def resolve_drop_policy(self, target: Target) -> DropPolicy | None:
@@ -525,6 +547,7 @@ class Hunter:
         if drop is None or not drop.enabled:
             return None
 
+        drop = self._effective_drop(drop)
         if drop_instant is None:
             drop_instant = next_occurrence_nyc(drop.at, now_nyc())
 
@@ -927,6 +950,12 @@ class Hunter:
         tasks.append(asyncio.create_task(self._reauth_loop(), name="reauth"))
 
         mode = "" if self.config.settings.poll_for_cancellations else " (drops only)"
+        if self.config.settings.aggressive_polling and self.secrets.has_proxy:
+            mode += " [aggressive via proxy]"
+        elif self.config.settings.aggressive_polling:
+            mode += " [aggressive IGNORED: no proxy]"
+        elif self.secrets.has_proxy:
+            mode += " [proxied]"
         log.warning(
             "James IV hunting %d target(s) with %d engine(s)%s%s",
             len(targets), len(tasks) - 1, mode,

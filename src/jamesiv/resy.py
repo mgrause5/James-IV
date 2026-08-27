@@ -91,6 +91,7 @@ class ResyClient:
         burst: int = 8,
         timeout: float = 8.0,
         base_url: str = BASE_URL,
+        proxy: str | None = None,
     ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -98,6 +99,7 @@ class ResyClient:
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             http2=True,
+            proxy=proxy or None,
             timeout=httpx.Timeout(timeout, connect=4.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
             headers={

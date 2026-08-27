@@ -56,6 +56,7 @@ def _make_client(config: Config, secrets: Secrets) -> ResyClient:
         api_key=secrets.resy_api_key or DEFAULT_API_KEY,
         rate=config.settings.request_rate,
         burst=config.settings.request_burst,
+        proxy=secrets.proxy_url or None,
     )
 
 
@@ -65,6 +66,7 @@ async def _with_hunter(config: Config, secrets: Secrets, fn):
         rate=config.settings.request_rate,
         burst=config.settings.request_burst,
         guest=secrets.guest_info(),
+        proxy=secrets.proxy_url or None,
     )
     notifier = Notifier(secrets)
     store = Store(config.settings.state_path)
@@ -418,7 +420,8 @@ def simulate(
 
     async def _sim():
         client = _make_client(config, secrets)
-        sr_client = SevenRoomsClient(rate=200, burst=200, guest=secrets.guest_info())
+        sr_client = SevenRoomsClient(rate=200, burst=200, guest=secrets.guest_info(),
+                                     proxy=secrets.proxy_url or None)
         notifier = Notifier(Secrets())          # no channels: alerts go to the log
         store = Store(":memory:")
         hunter = Hunter(

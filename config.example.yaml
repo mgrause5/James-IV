@@ -25,6 +25,13 @@ settings:
   # footprint. The trade: no cancellation catches between drops, and the
   # watcher-only restaurants below sit idle. Set true to hunt cancellations.
   poll_for_cancellations: false
+
+  # Aggressive polling -- turn this on ONCE you have set PROXY_URL in .env.
+  # It lifts the 5-shot cap and polls hard at each release (the technique the
+  # bots that actually win use). It is IGNORED without a proxy, because firing
+  # this volume from a bare datacenter IP gets an account banned fast; run
+  # `james doctor` and it will refuse to bless aggressive-without-proxy.
+  aggressive_polling: false
   max_bookings_per_run: 2  # global ceiling per process run, across all targets
   # Aggregate request budget, shared by ALL Resy targets. A dozen restaurants
   # politely polling from one address still add up, and Resy's edge notices
