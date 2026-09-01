@@ -30,9 +30,9 @@ $ext = [System.IO.Path]::GetExtension($File).ToLowerInvariant()
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 switch ($ext) {
-    { $_ -in '.xlam', '.xlsm' } { $xmlSource = Join-Path $here 'Excel_MGMacros_customUI14.xml' }
+    { $_ -in '.xlam', '.xlsm', '.xlsb' } { $xmlSource = Join-Path $here 'Excel_MGMacros_customUI14.xml' }
     { $_ -in '.ppam', '.pptm' } { $xmlSource = Join-Path $here 'PPT_MGMacros_customUI14.xml' }
-    default { throw "Unsupported file type '$ext' - expected .xlam/.xlsm (Excel) or .ppam/.pptm (PowerPoint)." }
+    default { throw "Unsupported file type '$ext' - expected .xlam/.xlsm/.xlsb (Excel) or .ppam/.pptm (PowerPoint)." }
 }
 if (-not (Test-Path -LiteralPath $xmlSource)) {
     throw "Ribbon XML not found next to this script: $xmlSource"

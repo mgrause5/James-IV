@@ -178,9 +178,10 @@ assembly step per app (~5 minutes); everything else is prebuilt.
 
 ### Excel: build `MGMacros.xlam`
 
-1. Open Excel with a blank workbook → `Alt+F11` → File → Import File… →
-   import **all three**: `Excel_AutoColor.bas`, `Excel_MGFormat.bas`, and
-   `Excel_MGRibbon.bas` into the blank workbook's project.
+1. Open Excel with a blank workbook → `Alt+F11`. If the Project pane on the
+   left isn't showing, press `Ctrl+R`. Click **VBAProject (Book1)** — not
+   PERSONAL.XLSB — then File → Import File… and import **all three**:
+   `Excel_AutoColor.bas`, `Excel_MGFormat.bas`, and `Excel_MGRibbon.bas`.
 2. Back in Excel: File → Save As → type **Excel Add-in (*.xlam)** → name it
    `MGMacros.xlam` (Excel jumps to your AddIns folder — fine). Close Excel.
 3. Embed the tab:
@@ -188,6 +189,13 @@ assembly step per app (~5 minutes); everything else is prebuilt.
    (run from the `ribbon/` folder; it writes a `.bak` backup first).
 4. Reopen Excel → File → Options → Add-ins → Manage **Excel Add-ins** → Go →
    check **MGMacros** (Browse to it if it isn't listed).
+
+> Prefer to keep everything in PERSONAL.XLSB instead of an add-in? That
+> works too: import the three modules into the PERSONAL.XLSB project,
+> `Ctrl+S`, close Excel, and run the installer against
+> `%APPDATA%\Microsoft\Excel\XLSTART\PERSONAL.XLSB` — it accepts `.xlsb`.
+> Just don't keep the modules in *both* places: two projects exporting the
+> same macro names makes the shortcuts ambiguous.
 
 You now have the **MG Macros tab** in every workbook, plus real shortcuts:
 **`Ctrl+Shift+A`** (AutoColor selection) and **`Ctrl+Shift+S`** (whole
