@@ -456,7 +456,13 @@ Private Function SelectedShapes() As ShapeRange
     Select Case sel.Type
         Case ppSelectionShapes, ppSelectionText
             On Error Resume Next
-            Set SelectedShapes = sel.ShapeRange
+            ' A shape clicked INSIDE a group is a child selection: work
+            ' on that member, not on the whole group's bounding box.
+            If sel.HasChildShapeRange Then
+                Set SelectedShapes = sel.ChildShapeRange
+            Else
+                Set SelectedShapes = sel.ShapeRange
+            End If
             On Error GoTo 0
     End Select
 End Function

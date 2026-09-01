@@ -33,7 +33,7 @@
                     onAction="MG_RibbonAction"/>
           </menu>
           <menu id="mgPosMenu" label="Grab Position" size="large"
-                imageMso="ObjectsAlignMenu" keytip="P"
+                imageMso="ObjectsAlignMenuOutlook" keytip="P"
                 screentip="Grab this shape's position"
                 supertip="Opens a chooser: grab the left edge, the top edge, both, or size and position together. Positions are slide coordinates, so they apply on any slide. Each grab replaces the previous one.">
             <button id="mgPosL" label="Grab Left" imageMso="ObjectsAlignLeft" keytip="L"

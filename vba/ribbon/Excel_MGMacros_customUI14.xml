@@ -62,11 +62,11 @@
         </group>
         <group id="mgShading" label="Shading">
           <button id="mgFillBlue" label="Blue Fill" size="large"
-                  imageMso="FillColorPicker" keytip="B"
+                  imageMso="CellFillColorPicker" keytip="B"
                   screentip="Light blue fill on the selected cells"
                   onAction="MG_RibbonAction"/>
           <button id="mgFillGrey" label="Grey Fill" size="large"
-                  imageMso="FillColorPicker" keytip="G"
+                  imageMso="CellFillColorPicker" keytip="G"
                   screentip="Light grey fill on the selected cells"
                   onAction="MG_RibbonAction"/>
           <button id="mgOutline" label="Grey Box" size="large"

@@ -21,8 +21,10 @@ Option Explicit
 '                             Alt, X, P = open the Grab Position chooser,
 '                             then L / T / B, or A for size + position
 '                             Alt, X, A = apply what was grabbed
-'                             Alt, X, E = swap two shapes
-'                             Alt, X, T = TBU marker
+'                             Alt, X, E = swap two shapes (L: by corners)
+'                             Alt, X, T = TBU marker (D / K clear the
+'                             slide's / the deck's markers)
+'                             Alt, X, C / M = copy / move slide to rider
 '
 '  For even shorter chords, add your favorite buttons to the Quick
 '  Access Toolbar - QAT slots answer to Alt+1 through Alt+9.

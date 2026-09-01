@@ -244,7 +244,8 @@ PowerPoint (which has no `OnKey` API, so no direct Ctrl-combos):
   chooser (then `W` width, `H` height, `B` both), `P` opens the Grab
   Position chooser (then `L` left edge, `T` top edge, `B` both, `A` size
   and position together), `A` applies what was grabbed — on any slide —
-  `W`/`H` apply just the width/height, `E` swap, `T` TBU, `C`/`M`
+  `W`/`H` apply just the width/height, `E` swap (`L` swap by corners),
+  `T` TBU (`D` clears the slide's markers, `K` the whole deck's), `C`/`M`
   copy/move to rider. So grabbing both dimensions of the shape you're on is
   `Alt, X, S, B`, and stamping its exact spot onto a shape on another page
   is `Alt, X, P, B` there, then `Alt, X, A` here. Every letter is a
