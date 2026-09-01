@@ -7,9 +7,12 @@
      Keyboard: Alt, X opens the tab. Then:
        D R   AutoColor the selection (also Ctrl+Shift+A)
        S     AutoColor the whole sheet (also Ctrl+Shift+S)
-       X, 1  number-format chooser: 1 number, 2 currency, 3 percent,
+       F, 1  number-format chooser: 1 number, 2 currency, 3 percent,
              4 multiple - all one decimal, all decimal-aligned
-       B     Copy Black - picture of the selection with all text black
+       B     light blue fill on the selection
+       G     light grey fill on the selection
+       X     medium grey outline around the selection
+       C     Copy Black - picture of the selection with all text black
      Caveat: if a legacy COM add-in makes the built-in Add-ins tab
      visible, that tab also claims the X keytip and Office reassigns
      the duplicate - pick another tab letter here if Alt, X ever
@@ -32,9 +35,9 @@
         </group>
         <group id="mgFormat" label="Format">
           <menu id="mgFormatMenu" label="Format" size="large"
-                imageMso="NumberFormatGallery" keytip="X"
+                imageMso="NumberFormatGallery" keytip="F"
                 screentip="MG formatting menu"
-                supertip="Alt, X, X opens it; 1 opens the number-format chooser.">
+                supertip="Alt, X, F opens it; 1 opens the number-format chooser.">
             <menu id="mgNumFmtMenu" label="Number Formats" keytip="1"
                   imageMso="NumberFormatGallery"
                   screentip="One-decimal formats that align at the decimal point">
@@ -57,9 +60,23 @@
             </menu>
           </menu>
         </group>
+        <group id="mgShading" label="Shading">
+          <button id="mgFillBlue" label="Blue Fill" size="large"
+                  imageMso="FillColorPicker" keytip="B"
+                  screentip="Light blue fill on the selected cells"
+                  onAction="MG_RibbonAction"/>
+          <button id="mgFillGrey" label="Grey Fill" size="large"
+                  imageMso="FillColorPicker" keytip="G"
+                  screentip="Light grey fill on the selected cells"
+                  onAction="MG_RibbonAction"/>
+          <button id="mgOutline" label="Grey Box" size="large"
+                  imageMso="BorderOutside" keytip="X"
+                  screentip="Medium grey outline around the selected range"
+                  onAction="MG_RibbonAction"/>
+        </group>
         <group id="mgOutput" label="Output">
           <button id="mgCopyBlack" label="Copy Black" size="large"
-                  imageMso="Camera" keytip="B"
+                  imageMso="Camera" keytip="C"
                   screentip="Copy the selection as an all-black picture"
                   supertip="Puts a picture of the selected range on the clipboard with every font black, so a color-coded sheet can go into external pages. The sheet itself is untouched."
                   onAction="MG_RibbonAction"/>

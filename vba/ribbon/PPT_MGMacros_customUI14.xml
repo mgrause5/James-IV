@@ -5,7 +5,10 @@
      MG_RibbonAction in PPT_MGRibbon.bas.
      Keyboard: Alt, X opens the tab. Grab Size is a dropdown:
      Alt, X, S opens it, then W grabs the width, H the height,
-     B both. Alt, X, A applies whatever was grabbed.
+     B both. Grab Position is the same on Alt, X, P: L left edge,
+     T top edge, B both, A size and position together.
+     Alt, X, A applies whatever was grabbed - on any slide.
+     Swap Shapes is Alt, X, E.
      Caveat: if a legacy COM add-in makes the built-in Add-ins tab
      visible, that tab also claims the X keytip and Office reassigns
      the duplicate - pick another tab letter here if Alt, X ever
@@ -14,7 +17,7 @@
   <ribbon startFromScratch="false">
     <tabs>
       <tab id="mgTab" label="MG Macros" keytip="X" insertAfterMso="TabHome">
-        <group id="mgSize" label="Size">
+        <group id="mgSize" label="Size &amp; Position">
           <menu id="mgGrabMenu" label="Grab Size" size="large"
                 imageMso="Copy" keytip="S"
                 screentip="Grab this shape's dimensions"
@@ -29,10 +32,27 @@
                     screentip="Remember this shape's width and height"
                     onAction="MG_RibbonAction"/>
           </menu>
+          <menu id="mgPosMenu" label="Grab Position" size="large"
+                imageMso="ObjectsAlignMenu" keytip="P"
+                screentip="Grab this shape's position"
+                supertip="Opens a chooser: grab the left edge, the top edge, both, or size and position together. Positions are slide coordinates, so they apply on any slide. Each grab replaces the previous one.">
+            <button id="mgPosL" label="Grab Left" imageMso="ObjectsAlignLeft" keytip="L"
+                    screentip="Remember only this shape's horizontal position"
+                    onAction="MG_RibbonAction"/>
+            <button id="mgPosT" label="Grab Top" imageMso="ObjectsAlignTop" keytip="T"
+                    screentip="Remember only this shape's vertical position"
+                    onAction="MG_RibbonAction"/>
+            <button id="mgPosB" label="Grab Position" imageMso="Copy" keytip="B"
+                    screentip="Remember this shape's left and top position"
+                    onAction="MG_RibbonAction"/>
+            <button id="mgPosAll" label="Grab Size + Position" imageMso="SizeToControlHeightAndWidth" keytip="A"
+                    screentip="Remember this shape's size and position - stamp its whole slot elsewhere"
+                    onAction="MG_RibbonAction"/>
+          </menu>
           <button id="mgApply" label="Apply" size="large"
                   imageMso="Paste" keytip="A"
                   screentip="Give the selected shapes whatever was grabbed"
-                  supertip="Applies exactly the dimensions you grabbed - width, height, or both."
+                  supertip="Applies exactly what you grabbed - size, position, or both - to the selected shapes, on this slide or any other."
                   onAction="MG_RibbonAction"/>
           <button id="mgApplyW" label="Apply Width" size="normal"
                   imageMso="SizeToControlWidth" keytip="W"
@@ -45,7 +65,7 @@
         </group>
         <group id="mgArrange" label="Arrange">
           <button id="mgSwap" label="Swap Shapes" size="large"
-                  imageMso="ObjectFlipHorizontal" keytip="P"
+                  imageMso="ObjectFlipHorizontal" keytip="E"
                   screentip="Two selected shapes trade places"
                   supertip="Centers swap, so different-sized shapes stay balanced in each other's spot."
                   onAction="MG_RibbonAction"/>

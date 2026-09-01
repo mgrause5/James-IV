@@ -11,8 +11,9 @@ Option Explicit
 '  Install-MGRibbon.ps1.
 '
 '  Keytips (Alt, X opens the tab): D R colors the selection, S the
-'  sheet; X then 1 opens the number-format chooser (1 number,
-'  2 currency, 3 percent, 4 multiple); B is Copy Black.
+'  sheet; F then 1 opens the number-format chooser (1 number,
+'  2 currency, 3 percent, 4 multiple); B light blue fill, G light
+'  grey fill, X grey outline; C is Copy Black.
 '
 '  MG_RibbonAction is the single callback every ribbon button points
 '  at; it dispatches on the button id from the XML.
@@ -43,6 +44,12 @@ Public Sub MG_RibbonAction(control As IRibbonControl)
             FormatPercentOneDecimal
         Case "mgFmtMult"
             FormatMultipleOneDecimal
+        Case "mgFillBlue"
+            FillSelectionLightBlue
+        Case "mgFillGrey"
+            FillSelectionLightGrey
+        Case "mgOutline"
+            OutlineSelectionGrey
         Case "mgCopyBlack"
             CopyBlackPicture
         Case Else

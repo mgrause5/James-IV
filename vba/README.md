@@ -98,6 +98,9 @@ Details worth knowing:
   decimal point when mixed in one column: each format shows its own suffix
   and pads invisibly for the suffixes it doesn't (`_x` / `_%` padding), so
   every digit lines up and the `x`/`%` hang off the right.
+- **`FillSelectionLightBlue` / `FillSelectionLightGrey` /
+  `OutlineSelectionGrey`** — quick shading: light blue or light grey fill
+  on the selected cells, or a thin medium-grey box around the selection.
 - **`CopyBlackPicture`** — copies the selected range to the clipboard as a
   picture with all text black (for external outputs from color-coded
   sheets). Works on a throwaway duplicate, so the real sheet keeps its
@@ -106,17 +109,22 @@ Details worth knowing:
 
 ### PPT_ShapeTools
 
-**Size grabber** — a format-painter for dimensions:
+**Size & position grabber** — a format-painter for geometry:
 
 1. Select one shape → grab what you want: **`GrabShapeWidth`**,
-   **`GrabShapeHeight`**, or **`GrabShapeSize`** for both (silent; set
+   **`GrabShapeHeight`**, or **`GrabShapeSize`** for both; **`GrabShapeLeft`**,
+   **`GrabShapeTop`**, or **`GrabShapePosition`** for where it sits; or
+   **`GrabShapeAll`** for size and position together (silent; set
    `CONFIRM_GRAB = True` in the CONFIG block for a popup). Each grab
    replaces the previous one.
-2. Select any other shape(s) → **`ApplySize`** applies exactly what you
-   grabbed; **`ApplyWidth`** / **`ApplyHeight`** cherry-pick one dimension.
-   Aspect-ratio lock is handled automatically, and "resize shape to fit
-   text" (autofit) is turned off on the targets so the applied size actually
-   sticks. The grab survives until you close PowerPoint.
+2. Select any other shape(s) — on this slide or any other — →
+   **`ApplyGrabbed`** applies exactly what you grabbed; **`ApplySize`** /
+   **`ApplyPosition`** / **`ApplyWidth`** / **`ApplyHeight`** cherry-pick.
+   Positions are slide coordinates, so a chart's spot on page 2 lands
+   identically on page 9. Aspect-ratio lock is handled automatically, and
+   "resize shape to fit text" (autofit) is turned off on the targets so the
+   applied size actually sticks. The grab survives until you close
+   PowerPoint.
 
 **Swap** — select exactly two shapes:
 
@@ -193,13 +201,16 @@ PowerPoint below applies):
 - `D R` — AutoColor the selection (works on a few cells or a whole
   highlighted sheet: whatever is selected gets the convention colors)
 - `S` — AutoColor the entire sheet's used range
-- `X`, then `1` — the number-format chooser: `1` number, `2` currency,
-  `3` percent, `4` multiple. So `Alt, X, X, 1, 3` formats the selection as
+- `F`, then `1` — the number-format chooser: `1` number, `2` currency,
+  `3` percent, `4` multiple. So `Alt, X, F, 1, 3` formats the selection as
   one-decimal percent. All four formats reserve the same trailing width, so
   `100.1`, `$8.2`, `12.3%` and `2.4x` align digit-for-digit at the decimal
   when mixed in a column, suffixes hanging off the right. The format
   strings live in the CONFIG block of `Excel_MGFormat.bas`.
-- `B` — **Copy Black**: puts a picture of the selected range on the
+- `B` — light blue fill on the selection; `G` — light grey fill; `X` — a
+  thin medium-grey box around the outside of the selection. Colors are in
+  the CONFIG block of `Excel_MGFormat.bas`.
+- `C` — **Copy Black**: puts a picture of the selected range on the
   clipboard with every font black, so a green/blue color-coded sheet can go
   into external pages. The sheet itself is untouched (the recolor happens on
   a throwaway copy). Cell contents only — embedded charts aren't included,
@@ -222,10 +233,14 @@ The tab loads in every session with all of its buttons. Keyboard access in
 PowerPoint (which has no `OnKey` API, so no direct Ctrl-combos):
 
 - **Keytips**: `Alt, X` opens the tab, then — `S` opens the Grab Size
-  chooser (then `W` width, `H` height, `B` both), `A` applies what was
-  grabbed, `W`/`H` apply just the width/height, `P` swap, `T` TBU, `C`/`M`
+  chooser (then `W` width, `H` height, `B` both), `P` opens the Grab
+  Position chooser (then `L` left edge, `T` top edge, `B` both, `A` size
+  and position together), `A` applies what was grabbed — on any slide —
+  `W`/`H` apply just the width/height, `E` swap, `T` TBU, `C`/`M`
   copy/move to rider. So grabbing both dimensions of the shape you're on is
-  `Alt, X, S, B`. Every letter is a `keytip="…"` attribute in
+  `Alt, X, S, B`, and stamping its exact spot onto a shape on another page
+  is `Alt, X, P, B` there, then `Alt, X, A` here. Every letter is a
+  `keytip="…"` attribute in
   `PPT_MGMacros_customUI14.xml` — change them there and re-run the
   installer.
 

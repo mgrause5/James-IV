@@ -18,7 +18,10 @@ Option Explicit
 '
 '    Alt, X, <key>      e.g.  Alt, X, S = open the Grab Size chooser,
 '                             then W / H / B picks width, height, both
+'                             Alt, X, P = open the Grab Position chooser,
+'                             then L / T / B, or A for size + position
 '                             Alt, X, A = apply what was grabbed
+'                             Alt, X, E = swap two shapes
 '                             Alt, X, T = TBU marker
 '
 '  For even shorter chords, add your favorite buttons to the Quick
@@ -37,8 +40,16 @@ Public Sub MG_RibbonAction(control As IRibbonControl)
             GrabShapeHeight
         Case "mgGrabB"
             GrabShapeSize
+        Case "mgPosL"
+            GrabShapeLeft
+        Case "mgPosT"
+            GrabShapeTop
+        Case "mgPosB"
+            GrabShapePosition
+        Case "mgPosAll"
+            GrabShapeAll
         Case "mgApply"
-            ApplySize
+            ApplyGrabbed
         Case "mgApplyW"
             ApplyWidth
         Case "mgApplyH"

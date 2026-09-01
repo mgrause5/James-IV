@@ -5,9 +5,10 @@ Option Explicit
 '  Excel_MGFormat
 '  -------------------------------------------------------------------
 '  Number formats that stay decimal-aligned when mixed in one column,
-'  plus Copy Black for external outputs. Wired to the MG Macros tab's
-'  Format menu (Alt, X, X, 1, then 1-4) and Copy Black button
-'  (Alt, X, B) via Excel_MGRibbon.bas.
+'  quick shading, and Copy Black for external outputs. Wired to the
+'  MG Macros tab via Excel_MGRibbon.bas: Format menu (Alt, X, F, 1,
+'  then 1-4), fills (Alt, X, B / G), outline (Alt, X, X), Copy Black
+'  (Alt, X, C).
 '
 '    FormatNumberOneDecimal     100.1
 '    FormatCurrencyOneDecimal   $100.1
@@ -19,6 +20,10 @@ Option Explicit
 '  of the suffixes it doesn't ("_x" pads the width of an x, "_%" the
 '  width of a %). So 100.1 / $8.2 / 12.3% / 2.4x all line up
 '  digit-for-digit at the decimal, suffixes hanging off the right.
+'
+'    FillSelectionLightBlue  - light blue fill on the selected cells
+'    FillSelectionLightGrey  - light grey fill on the selected cells
+'    OutlineSelectionGrey    - thin medium-grey box around the selection
 '
 '    CopyBlackPicture - copies the selected range to the clipboard as
 '    a picture with ALL text black, so a green/blue-coded sheet can go
@@ -33,6 +38,10 @@ Private Const FMT_NUMBER As String = "#,##0.0_x_%"
 Private Const FMT_CURRENCY As String = "$#,##0.0_x_%"
 Private Const FMT_PERCENT As String = "#,##0.0%_x"
 Private Const FMT_MULTIPLE As String = "#,##0.0""x""_%"
+
+Private Const FILL_LIGHT_BLUE As Long = 16247773   ' RGB(221, 235, 247)
+Private Const FILL_LIGHT_GREY As Long = 14277081   ' RGB(217, 217, 217)
+Private Const LINE_MEDIUM_GREY As Long = 10921638  ' RGB(166, 166, 166)
 ' ---------------------------------------------------------------------
 
 Public Sub FormatNumberOneDecimal()
@@ -61,6 +70,48 @@ Private Sub ApplyNumberFormat(ByVal fmt As String)
     Exit Sub
 Failed:
     MsgBox "Could not apply the format - if the sheet is protected, unprotect it and try again.", _
+           vbExclamation, "MG Format"
+End Sub
+
+Public Sub FillSelectionLightBlue()
+    ApplyFill FILL_LIGHT_BLUE
+End Sub
+
+Public Sub FillSelectionLightGrey()
+    ApplyFill FILL_LIGHT_GREY
+End Sub
+
+Private Sub ApplyFill(ByVal fillColor As Long)
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Select some cells first.", vbExclamation, "MG Format"
+        Exit Sub
+    End If
+    On Error GoTo Failed
+    With Selection.Interior
+        .Pattern = xlSolid
+        .Color = fillColor
+    End With
+    Exit Sub
+Failed:
+    MsgBox "Could not fill the cells - if the sheet is protected, unprotect it and try again.", _
+           vbExclamation, "MG Format"
+End Sub
+
+' A thin medium-grey border around the OUTSIDE of the selection (each
+' area gets its own box when several are selected).
+Public Sub OutlineSelectionGrey()
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Select the range you want boxed.", vbExclamation, "MG Format"
+        Exit Sub
+    End If
+    On Error GoTo Failed
+    Dim area As Range
+    For Each area In Selection.Areas
+        area.BorderAround LineStyle:=xlContinuous, Weight:=xlThin, Color:=LINE_MEDIUM_GREY
+    Next area
+    Exit Sub
+Failed:
+    MsgBox "Could not draw the box - if the sheet is protected, unprotect it and try again.", _
            vbExclamation, "MG Format"
 End Sub
 

@@ -4,17 +4,22 @@ Option Explicit
 ' =====================================================================
 '  PPT_ShapeTools
 '  -------------------------------------------------------------------
-'  Size tools (a format-painter for dimensions):
-'    GrabShapeWidth  - remember only the selected shape's width
-'    GrabShapeHeight - remember only the selected shape's height
-'    GrabShapeSize   - remember both dimensions
-'    ApplySize       - give the selected shapes whatever was grabbed
-'    ApplyWidth      - give them just the grabbed width
-'    ApplyHeight     - give them just the grabbed height
+'  Size & position tools (a format-painter for geometry):
+'    GrabShapeWidth    - remember only the selected shape's width
+'    GrabShapeHeight   - remember only its height
+'    GrabShapeSize     - remember both dimensions
+'    GrabShapeLeft     - remember only its horizontal position
+'    GrabShapeTop      - remember only its vertical position
+'    GrabShapePosition - remember both coordinates
+'    GrabShapeAll      - remember size AND position (stamp a slot)
+'    ApplyGrabbed      - give the selected shapes whatever was grabbed
+'    ApplySize / ApplyPosition / ApplyWidth / ApplyHeight - cherry-pick
 '
-'  Each grab REPLACES what is held (grabbing just the width forgets a
-'  previously grabbed height), so Apply always means "apply exactly
-'  what I last grabbed".
+'  Each grab REPLACES what is held (grabbing a position forgets a
+'  previously grabbed size), so Apply always means "apply exactly
+'  what I last grabbed". Positions are slide coordinates, so they
+'  carry across slides: grab a chart's spot on page 2, go to page 9,
+'  select the chart there, apply.
 '
 '  Applying a size turns OFF "resize shape to fit text" (autofit) on
 '  the target shapes - autofit would silently snap them straight back
@@ -39,10 +44,10 @@ Option Explicit
 '  groups too - a marker grouped with the shape it flags still gets
 '  cleaned up.
 '
-'  The grabbed size lives until PowerPoint closes or the VBA project
-'  resets, and works across presentations. Grabbing is silent by
-'  design (no popup between grab and apply); flip CONFIRM_GRAB below
-'  if you want a confirmation.
+'  A grab lives until PowerPoint closes or the VBA project resets,
+'  and works across presentations. Grabbing is silent by design (no
+'  popup between grab and apply); flip CONFIRM_GRAB below if you want
+'  a confirmation.
 ' =====================================================================
 
 ' ----------------------------- CONFIG --------------------------------
@@ -62,110 +67,172 @@ Private Const CONFIRM_GRAB As Boolean = False     ' popup after each grab?
 
 Private mGrabbedW As Single
 Private mGrabbedH As Single
+Private mGrabbedL As Single
+Private mGrabbedT As Single
 Private mHaveW As Boolean
 Private mHaveH As Boolean
+Private mHaveL As Boolean
+Private mHaveT As Boolean
 
-' ------------------------------ Size ---------------------------------
+' ------------------------- Size & position ---------------------------
 
 Public Sub GrabShapeWidth()
-    GrabDims True, False
+    GrabFrom True, False, False, False
 End Sub
 
 Public Sub GrabShapeHeight()
-    GrabDims False, True
+    GrabFrom False, True, False, False
 End Sub
 
 Public Sub GrabShapeSize()
-    GrabDims True, True
+    GrabFrom True, True, False, False
 End Sub
 
-Private Sub GrabDims(ByVal doWidth As Boolean, ByVal doHeight As Boolean)
+Public Sub GrabShapeLeft()
+    GrabFrom False, False, True, False
+End Sub
+
+Public Sub GrabShapeTop()
+    GrabFrom False, False, False, True
+End Sub
+
+Public Sub GrabShapePosition()
+    GrabFrom False, False, True, True
+End Sub
+
+Public Sub GrabShapeAll()
+    GrabFrom True, True, True, True
+End Sub
+
+Private Sub GrabFrom(ByVal doW As Boolean, ByVal doH As Boolean, _
+                     ByVal doL As Boolean, ByVal doT As Boolean)
     Dim shps As ShapeRange
     Set shps = SelectedShapes()
     If shps Is Nothing Then
-        MsgBox "Select the shape whose size you want to grab.", vbExclamation, "Grab size"
+        MsgBox "Select the shape you want to grab from.", vbExclamation, "Grab"
         Exit Sub
     End If
     If shps.Count <> 1 Then
         MsgBox "Select exactly one shape to grab from (you have " & shps.Count & " selected).", _
-               vbExclamation, "Grab size"
+               vbExclamation, "Grab"
         Exit Sub
     End If
 
     ' A new grab replaces the old one entirely.
-    mHaveW = doWidth
-    mHaveH = doHeight
-    If doWidth Then mGrabbedW = shps(1).Width
-    If doHeight Then mGrabbedH = shps(1).Height
+    mHaveW = doW
+    mHaveH = doH
+    mHaveL = doL
+    mHaveT = doT
+    With shps(1)
+        If doW Then mGrabbedW = .Width
+        If doH Then mGrabbedH = .Height
+        If doL Then mGrabbedL = .Left
+        If doT Then mGrabbedT = .Top
+    End With
 
     If CONFIRM_GRAB Then
-        Dim what As String
-        If doWidth Then what = Format$(mGrabbedW / 72, "0.00") & """ wide"
-        If doHeight Then
-            If Len(what) > 0 Then what = what & " x "
-            what = what & Format$(mGrabbedH / 72, "0.00") & """ tall"
-        End If
-        MsgBox "Grabbed " & what & ".", vbInformation, "Grab size"
+        MsgBox "Grabbed " & DescribeHeld() & ".", vbInformation, "Grab"
     End If
+End Sub
+
+Private Function DescribeHeld() As String
+    Dim s As String
+    If mHaveW Then s = s & ", " & Format$(mGrabbedW / 72, "0.00") & """ wide"
+    If mHaveH Then s = s & ", " & Format$(mGrabbedH / 72, "0.00") & """ tall"
+    If mHaveL Then s = s & ", left " & Format$(mGrabbedL / 72, "0.00") & """"
+    If mHaveT Then s = s & ", top " & Format$(mGrabbedT / 72, "0.00") & """"
+    DescribeHeld = Mid$(s, 3)
+End Function
+
+' Applies whatever was last grabbed - any mix of size and position.
+Public Sub ApplyGrabbed()
+    If Not (mHaveW Or mHaveH Or mHaveL Or mHaveT) Then
+        MsgBox "Nothing grabbed yet - use Grab Size or Grab Position on a shape first.", _
+               vbExclamation, "Apply"
+        Exit Sub
+    End If
+    ApplyHeld mHaveW, mHaveH, mHaveL, mHaveT
+End Sub
+
+Public Sub ApplySize()
+    If Not (mHaveW Or mHaveH) Then
+        MsgBox "No size grabbed yet - use Grab Size on a shape first.", vbExclamation, "Apply"
+        Exit Sub
+    End If
+    ApplyHeld mHaveW, mHaveH, False, False
+End Sub
+
+Public Sub ApplyPosition()
+    If Not (mHaveL Or mHaveT) Then
+        MsgBox "No position grabbed yet - use Grab Position on a shape first.", vbExclamation, "Apply"
+        Exit Sub
+    End If
+    ApplyHeld False, False, mHaveL, mHaveT
 End Sub
 
 Public Sub ApplyWidth()
-    ApplyGrabbed True, False
+    ApplyHeld True, False, False, False
 End Sub
 
 Public Sub ApplyHeight()
-    ApplyGrabbed False, True
+    ApplyHeld False, True, False, False
 End Sub
 
-' Applies whatever was last grabbed - width, height, or both.
-Public Sub ApplySize()
-    If Not (mHaveW Or mHaveH) Then
-        MsgBox "Nothing grabbed yet - use Grab Size on a shape first.", vbExclamation, "Apply size"
-        Exit Sub
-    End If
-    ApplyGrabbed mHaveW, mHaveH
-End Sub
-
-Private Sub ApplyGrabbed(ByVal doWidth As Boolean, ByVal doHeight As Boolean)
-    If doWidth And Not mHaveW Then
+Private Sub ApplyHeld(ByVal doW As Boolean, ByVal doH As Boolean, _
+                      ByVal doL As Boolean, ByVal doT As Boolean)
+    If doW And Not mHaveW Then
         MsgBox "No width grabbed yet - use Grab Size > Grab Width (or Grab Both) first.", _
-               vbExclamation, "Apply size"
+               vbExclamation, "Apply"
         Exit Sub
     End If
-    If doHeight And Not mHaveH Then
+    If doH And Not mHaveH Then
         MsgBox "No height grabbed yet - use Grab Size > Grab Height (or Grab Both) first.", _
-               vbExclamation, "Apply size"
+               vbExclamation, "Apply"
+        Exit Sub
+    End If
+    If doL And Not mHaveL Then
+        MsgBox "No left position grabbed yet - use Grab Position first.", vbExclamation, "Apply"
+        Exit Sub
+    End If
+    If doT And Not mHaveT Then
+        MsgBox "No top position grabbed yet - use Grab Position first.", vbExclamation, "Apply"
         Exit Sub
     End If
 
     Dim shps As ShapeRange
     Set shps = SelectedShapes()
     If shps Is Nothing Then
-        MsgBox "Select the shape(s) you want to resize.", vbExclamation, "Apply size"
+        MsgBox "Select the shape(s) you want to apply to.", vbExclamation, "Apply"
         Exit Sub
     End If
 
     Dim shp As Shape, lockState As MsoTriState
     For Each shp In shps
-        ' LockAspectRatio would drag the other dimension along, so it
-        ' is parked off while the new size goes in, then restored.
-        lockState = shp.LockAspectRatio
-        shp.LockAspectRatio = msoFalse
+        If doW Or doH Then
+            ' LockAspectRatio would drag the other dimension along, so
+            ' it is parked off while the new size goes in, then restored.
+            lockState = shp.LockAspectRatio
+            shp.LockAspectRatio = msoFalse
 
-        ' Autofit ("resize shape to fit text", the default on inserted
-        ' text boxes) recomputes the size from the text the moment it
-        ' changes, silently undoing the apply - so it stays off.
-        On Error Resume Next   ' lines, pictures, groups: no text frame
-        If shp.HasTextFrame Then
-            If shp.TextFrame.AutoSize <> ppAutoSizeNone Then
-                shp.TextFrame.AutoSize = ppAutoSizeNone
+            ' Autofit ("resize shape to fit text", the default on
+            ' inserted text boxes) recomputes the size from the text the
+            ' moment it changes, silently undoing the apply - so it
+            ' stays off.
+            On Error Resume Next   ' lines, pictures, groups: no text frame
+            If shp.HasTextFrame Then
+                If shp.TextFrame.AutoSize <> ppAutoSizeNone Then
+                    shp.TextFrame.AutoSize = ppAutoSizeNone
+                End If
             End If
-        End If
-        On Error GoTo 0
+            On Error GoTo 0
 
-        If doWidth Then shp.Width = mGrabbedW
-        If doHeight Then shp.Height = mGrabbedH
-        shp.LockAspectRatio = lockState
+            If doW Then shp.Width = mGrabbedW
+            If doH Then shp.Height = mGrabbedH
+            shp.LockAspectRatio = lockState
+        End If
+
+        If doL Then shp.Left = mGrabbedL
+        If doT Then shp.Top = mGrabbedT
     Next shp
 End Sub
 
